@@ -22,8 +22,8 @@
 -- settings in /etc/mpd.conf to prevent "MPD Connection timeout" errors 
 -- from appearing on the page during rapid "next" events.
 --
--- > connection_timeout	        "15" # was 60
--- > max_connections	        "30" # was 10
+-- > connection_timeout	"15" # was 60
+-- > max_connections	"30" # was 10
 --
 -- seem to work for me.
 --
@@ -58,18 +58,23 @@ getMPC :: a -> MPC
 getMPC = const MPC
 
 class Yesod m => YesodMPC m where
-    refreshSpeed :: GHandler s m Int -- ^ the status page will auto-refresh each x seconds
-    mpdConfig    :: GHandler s m (Maybe MpdConfig) -- ^ custom mpd config
-    authHelper   :: GHandler s m () -- ^ some form of requireAuth or return ()
+    -- | The status page will auto-refresh each x seconds
+    refreshSpeed :: GHandler s m Int
+
+    -- | Maybe a custom mpd config
+    mpdConfig :: GHandler s m (Maybe MpdConfig)
+
+    -- | Some form of requireAuth or return ()
+    authHelper :: GHandler s m ()
 
 mkYesodSub "MPC" 
     [ ClassP ''YesodMPC [ VarT $ mkName "master" ]
     ] 
     [$parseRoutes|
-    /           StatusR GET
-    /prev       PrevR   GET
-    /pause      PauseR  GET
-    /next       NextR   GET
+    /            StatusR GET
+    /prev        PrevR   GET
+    /pause       PauseR  GET
+    /next        NextR   GET
     /play/#Int   PlayR GET
     /delete/#Int DelR  GET
     |]
@@ -101,26 +106,26 @@ getStatusR = do
         -- addCassius... {{{
         addCassius [$cassius|
         .title
-            font-weight: bold
-            font-size: 200%
+            font-weight:  bold
+            font-size:    200%
             padding-left: 10px
 
         .controls table
-            margin-left: auto
-            margin-right: auto
-            padding: 5px
-            padding-top: 20px
+            margin-left:    auto
+            margin-right:   auto
+            padding:        5px
+            padding-top:    20px
             padding-bottom: 20px
 
         .playlist table
-            margin-left: auto
+            margin-left:  auto
             margin-right: auto
 
         .playlist th
             border-bottom: solid 1px
 
         .playlist td
-            padding-left: 5px
+            padding-left:  5px
             padding-right: 5px
 
         tr.current
@@ -128,8 +133,8 @@ getStatusR = do
 
         td.playlist_button
             text-align: center
-            font-size: 75%
-            width: 20px
+            font-size:  75%
+            width:      20px
 
         a:link, a:visited, a:hover
             outline:         none
@@ -146,16 +151,12 @@ getStatusR = do
 
         -- page content
         addHamlet [$hamlet| 
-
         %h1 MPD 
 
         ^playing^
         ^playlist^
         ^controls^
 
-        %p.small
-            %em
-                %a!href="https://github.com/pbrisbin/devsite/blob/master/Helpers/MPC.hs" source code
         %script
             window.onload = timedRefresh;
         %noscript
@@ -317,7 +318,12 @@ formattedPlaylist toMaster limit = do
                             then string "current"
                             else string "not_current"
 
-fixBounds :: Int -> Int -> Int -> (Int, Int)
+-- | Show playlist context with now playing centered but ensure we don't 
+--   send invalide upper and lower bounds to the request
+fixBounds :: Int -- ^ id of currently playing track
+          -> Int -- ^ length of current playlist
+          -> Int -- ^ how many lines of context to show (+/- 1)
+          -> (Int, Int)
 fixBounds cid len limit = let
     lower = cid - limit `div` 2
     upper = cid + limit `div` 2
