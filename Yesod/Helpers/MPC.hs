@@ -189,14 +189,10 @@ getNextR = authHelper >> actionRoute MPD.next
 
 -- | Play a specific song in playlist
 getPlayR :: YesodMPC m => Int -> GHandler MPC m RepHtml
-getPlayR pid = do
-    authHelper
-    actionRoute $ MPD.playId pid
+getPlayR pid = authHelper >> actionRoute (MPD.playId pid)
 
 getDelR :: YesodMPC m => Int -> GHandler MPC m RepHtml
-getDelR pid = do
-    authHelper
-    actionRoute $ MPD.deleteId pid
+getDelR pid = authHelper >> actionRoute (MPD.deleteId pid)
 
 -- | Execute any mpd action then redirect back to the main status page
 actionRoute :: YesodMPC m => MPD.MPD a -> GHandler MPC m RepHtml
