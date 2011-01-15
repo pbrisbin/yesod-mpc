@@ -1,25 +1,24 @@
-Name:                yesod-mpc
-Version:             0.1
-Synopsis:            Controlling a running mpd through a yesod subsite
-Homepage:            http://github.com/pbrisbin/yesod-mpc
-License:             BSD3
-License-file:        LICENSE
-Author:              Patrick Brisbin
-Maintainer:          me@pbrisbin.com
-Category:            Web
-Build-type:          Simple
-Cabal-version:       >=1.2
+name:                yesod-mpc
+version:             0.1
+synopsis:            Controlling a running mpd through a yesod subsite
+homepage:            http://github.com/pbrisbin/yesod-mpc
+license:             BSD3
+license-file:        LICENSE
+author:              Patrick Brisbin
+maintainer:          me@pbrisbin.com
+category:            Web, Yesod
+build-type:          Simple
+cabal-version:       >=1.2
 
-Library
+library
   -- Modules exported by the library.
-  Exposed-modules: Yesod.Helpers.MPC
+  exposed-modules: Yesod.Helpers.MPC
   
   -- Packages needed in order to build this package.
-  Build-depends: base, yesod, libmpd, containers, template-haskell, hamlet
+  build-depends: base, yesod, libmpd, containers, template-haskell, hamlet
+
+  ghc-options: -Wall
   
-  -- Modules not exported by this package.
-  -- Other-modules:       
-  
-  -- Extra tools (e.g. alex, hsc2hs, ...) needed to build the source.
-  -- Build-tools:         
-  
+source-repository head
+  type:         git
+  location:     git://github.com/pbrisbin/yesod-mpc.git
