@@ -47,8 +47,8 @@ import qualified Network.MPD as MPD
 
 -- | Customize your connection to MPD
 data MpdConfig = MpdConfig
-    { mpdHost     :: String
-    , mpdPort     :: Integer
+    { mpdHost     :: MPD.Host
+    , mpdPort     :: MPD.Port
     , mpdPassword :: String
     }
 
@@ -58,14 +58,17 @@ getMPC :: a -> MPC
 getMPC = const MPC
 
 class Yesod m => YesodMPC m where
-    -- | The status page will auto-refresh each x seconds
+    -- | seconds, default is 10, return 0 to disable
     refreshSpeed :: GHandler s m Int
+    refreshSpeed = return 10
 
-    -- | Maybe a custom mpd config
+    -- | default is Nothing, standard connection
     mpdConfig :: GHandler s m (Maybe MpdConfig)
+    mpdConfig = return Nothing
 
-    -- | Some form of requireAuth or return ()
+    -- | default is return (), don't authentication
     authHelper :: GHandler s m ()
+    authHelper = return ()
 
 mkYesodSub "MPC" 
     [ ClassP ''YesodMPC [ VarT $ mkName "master" ]
@@ -143,11 +146,17 @@ getStatusR = do
         -- }}}
 
         -- auto refresh function
-        addJulius [$julius|
-            function timedRefresh() {
-                setTimeout("location.reload(true);", %show.delay%);
-            }
-            |]
+        if delay /= 0
+            then addJulius [$julius|
+                function timedRefresh() {
+                    setTimeout("location.reload(true);", %show.delay%);
+                }
+                |]
+            else addJulius [$julius|
+                function timedRefrehs() {
+                    ; // no-op
+                }
+                |]
 
         -- page content
         addHamlet [$hamlet| 
