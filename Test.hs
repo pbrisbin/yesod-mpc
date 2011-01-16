@@ -18,11 +18,8 @@ mkYesod "MpcTest" [$parseRoutes| /mpc MpcR MPC getMPC |]
 
 instance Yesod MpcTest where approot _ = ""
 
--- | Make your site an instance of YesodMPC
+-- | Make your site an instance of YesodMPC using all default values
 instance YesodMPC MpcTest where
-    refreshSpeed = return 10      -- ^ page refreshes every 10 seconds
-    mpdConfig    = return Nothing -- ^ use default connection
-    authHelper   = return ()      -- ^ don't authenticate
 
 main :: IO ()
 main = putStrLn "Loaded" >> toWaiApp MpcTest >>= run 3000
