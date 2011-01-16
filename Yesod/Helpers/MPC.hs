@@ -108,38 +108,38 @@ getStatusR = do
         -- some sane styling
         -- addCassius... {{{
         addCassius [$cassius|
-        .title
+        .mpc_title
             font-weight:  bold
             font-size:    200%
             padding-left: 10px
 
-        .controls table
+        .mpc_controls table
             margin-left:    auto
             margin-right:   auto
             padding:        5px
             padding-top:    20px
             padding-bottom: 20px
 
-        .playlist table
+        .mpc_playlist table
             margin-left:  auto
             margin-right: auto
 
-        .playlist th
+        .mpc_playlist th
             border-bottom: solid 1px
 
-        .playlist td
+        .mpc_playlist td
             padding-left:  5px
             padding-right: 5px
 
-        tr.current
+        tr.mpc_current
             font-weight: bold
 
-        td.playlist_button
+        td.mpc_playlist_button
             text-align: center
             font-size:  75%
             width:      20px
 
-        a:link, a:visited, a:hover
+        .mpc a:link, .mpc a:visited, .mpc a:hover
             outline:         none
             text-decoration: none
         |]
@@ -160,16 +160,17 @@ getStatusR = do
 
         -- page content
         addHamlet [$hamlet| 
-        %h1 MPD 
+        .mpc
+            %h1 MPD 
 
-        ^playing^
-        ^playlist^
-        ^controls^
+            ^playing^
+            ^playlist^
+            ^controls^
 
-        %script
-            window.onload = timedRefresh;
-        %noscript
-            %em note: javascript is required for auto-refresh
+            %script
+                window.onload = timedRefresh;
+            %noscript
+                %em note: javascript is required for auto-refresh
         |]
 
 -- | Previous
@@ -239,24 +240,24 @@ getNowPlaying = do
             album  = getTag MPD.Album  song
             year   = getTag MPD.Date   song
             in [$hamlet|
-            .nowplaying
+            .mpc_nowplaying
                 %p
-                    %span.state  $state$
+                    %span.mpc_state  $state$
                     \ / 
-                    %span.artist $artist$
+                    %span.mpc_artist $artist$
                     \ - 
-                    %span.album  $album$
+                    %span.mpc_album  $album$
                     \ 
-                    %span.year   ($year$)
+                    %span.mpc_year   ($year$)
 
                 %p
-                    %span.title $title$
+                    %span.mpc_title $title$
             |]
 
 -- | The control links themselves
 playerControls :: (YesodMPC m, HamletValue a) => (MPCRoute -> HamletUrl a) -> GHandler MPC m a
 playerControls toMaster = return [$hamlet|
-    .controls
+    .mpc_controls
         %table
             %tr
                 %td
@@ -291,7 +292,7 @@ formattedPlaylist toMaster limit = do
     case result of
         Left err    -> return [$hamlet| %em $string.show.err$ |]
         Right songs -> return [$hamlet|
-            .playlist
+            .mpc_playlist
                 %table
                     %tr
                         %th #
@@ -312,15 +313,15 @@ formattedPlaylist toMaster limit = do
                         %td $string.show.pid$
                         %td $artist$
                         %td $title$
-                        %td.playlist_button
+                        %td.mpc_playlist_button
                             %a!href=@toMaster.PlayR.pid@ |>
-                        %td.playlist_button
+                        %td.mpc_playlist_button
                             %a!href=@toMaster.DelR.pid@  X
                     |]
                     where
                         clazz x = if x == cid
-                            then string "current"
-                            else string "not_current"
+                            then string "mpc_current"
+                            else string "mpc_not_current"
 
 -- | Show playlist context with now playing centered but ensure we don't 
 --   send invalide upper and lower bounds to the request
