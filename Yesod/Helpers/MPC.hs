@@ -4,7 +4,7 @@
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 -------------------------------------------------------------------------------
---
+-- |
 -- Module        : Yesod.Helpers.MPC
 -- Copyright     : Patrick Brisbin
 -- License       : as-is
@@ -71,7 +71,7 @@ class Yesod m => YesodMPC m where
     mpdConfig :: GHandler s m (Maybe MpdConfig)
     mpdConfig = return Nothing
 
-    -- | default is return (), don't authentication
+    -- | default is return (), don't authenticate
     authHelper :: GHandler s m ()
     authHelper = return ()
 
