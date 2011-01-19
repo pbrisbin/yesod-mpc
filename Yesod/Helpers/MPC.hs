@@ -19,8 +19,8 @@
 --
 -- Since each page load and redirect makes a new connection to MPD (and 
 -- I've yet to figure out to prevent this), I recommend you adjust your 
--- settings in /etc/mpd.conf to prevent "MPD Connection timeout" errors 
--- from appearing on the page during rapid "next" events.
+-- settings in @\/etc\/mpd.conf@ to prevent \"MPD Connection timeout\" 
+-- errors from appearing on the page during rapid next events.
 --
 -- > connection_timeout	"15" # was 60
 -- > max_connections	"30" # was 10
