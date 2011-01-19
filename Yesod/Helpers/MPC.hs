@@ -45,6 +45,11 @@ import Language.Haskell.TH.Syntax hiding (lift)
 import qualified Data.Map as M
 import qualified Network.MPD as MPD
 
+--import System.IO
+--
+--debug :: (YesodMPC m) => String -> GHandler s m ()
+--debug = liftIO . hPutStrLn stderr
+
 -- | Customize your connection to MPD
 data MpdConfig = MpdConfig
     { mpdHost     :: MPD.Host
@@ -190,8 +195,8 @@ getPauseR = authHelper >> getPlayPause >>= actionRoute
                     MPD.Playing -> return $ MPD.pause True
                     MPD.Stopped -> return $ MPD.play Nothing
                     MPD.Paused  -> return $ MPD.play Nothing
-                -- meh, should probably handle err better
-                Left err -> return $ MPD.play Nothing
+                -- meh, should probably handle this
+                Left _ -> return $ MPD.play Nothing
 
 -- | Next
 getNextR :: YesodMPC m => GHandler MPC m RepHtml
@@ -275,17 +280,19 @@ formattedPlaylist :: (YesodMPC m, HamletValue a)
                   -> Int                       -- ^ limit display
                   -> GHandler MPC m a
 formattedPlaylist toMaster limit = do
-    -- id of currently playing song
-    cid <- liftM (fromMaybe 0) currentId
+    -- position and id of currently playing song
+    (pos,cid) <- liftM (fromMaybe (0,0)) currentId
+
+    -- length of current playlist
     len <- do 
         -- length of current playlist
         result <- withMPD $ MPD.playlistInfo Nothing
         case result of
-            Left err    -> return 0
+            Left _      -> return 0
             Right songs -> return $ length songs
 
-    -- prevent a bad index
-    let (lower,upper) = fixBounds cid len limit
+    -- find bounds to show len lines of context
+    let (lower,upper) = fixBounds pos len limit
 
     -- get the limited, auto-centered playlist records
     result <- withMPD $ MPD.playlistInfo (Just (lower, upper))
@@ -325,29 +332,29 @@ formattedPlaylist toMaster limit = do
 
 -- | Show playlist context with now playing centered but ensure we don't 
 --   send invalide upper and lower bounds to the request
-fixBounds :: Int -- ^ id of currently playing track
+fixBounds :: Int -- ^ pos of currently playing track
           -> Int -- ^ length of current playlist
           -> Int -- ^ how many lines of context to show (+/- 1)
           -> (Int, Int)
-fixBounds cid len limit = let
-    lower = cid - limit `div` 2
-    upper = cid + limit `div` 2
+fixBounds pos len limit = let
+    lower = pos - limit `div` 2
+    upper = pos + limit `div` 2
     in if lower < 0 && upper > len
         then (0, len)
         else if lower < 0
             then fixBounds (limit `div` 2) len limit
             else if upper > len
-                then fixBounds (cid - (upper - len)) len limit
+                then fixBounds (pos - (upper - len)) len limit
                 else (lower, upper)
 
 -- | Return maybe the id of the currently playing song
-currentId :: YesodMPC m => GHandler MPC m (Maybe Int)
+currentId :: YesodMPC m => GHandler MPC m (Maybe (Int,Int))
 currentId = do
     result <- withMPD MPD.currentSong
     case result of
         Left _            -> return Nothing
         Right Nothing     -> return Nothing
-        Right (Just song) -> return . fmap snd $ MPD.sgIndex song
+        Right (Just song) -> return $ MPD.sgIndex song
 
 -- | Get the first instance of the given tag in the the passed song, 
 --   return "N/A" if it's not found
