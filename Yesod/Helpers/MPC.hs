@@ -223,6 +223,15 @@ getStatusR = do
                 }
             }
 
+            function pad(num) {
+                var padded = num + "";
+
+                while (padded.length < 2)
+                    padded = "0" + padded
+
+                return padded;
+            }
+
             // print seconds has M:SS
             function prettyTime(seconds) {
                 var left    = seconds %% 60
@@ -233,7 +242,7 @@ getStatusR = do
                 else
                     left = Math.ceil(left);
 
-                return Math.round(minutes) + ":" + left;
+                return pad(Math.round(minutes)) + ":" + pad(left);
             }
 
             // ask the server for updated now playing info
@@ -297,7 +306,8 @@ getStatusR = do
         prettyTimeD  n = prettyTime round n
         prettyTimeI  n = prettyTime (round . fromInteger) n
         prettyTime f n = let minutes = f n `div` 60
-                             left    = f n `mod` 60 in (show minutes) ++ ":" ++ (show left)
+                             left    = f n `mod` 60 in (pad $ show minutes) ++ ":" ++ (pad $ show left)
+        pad s = if length s == 1 then '0':s else s
 
 -- | Previous
 getPrevR :: YesodMPC m => GHandler MPC m RepHtml
