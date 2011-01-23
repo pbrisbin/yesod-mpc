@@ -51,6 +51,8 @@ import qualified Network.MPD as MPD
 --debug :: (YesodMPC m) => String -> GHandler s m ()
 --debug = liftIO . hPutStrLn stderr
 
+-- | Represents now playing state, see 'nowPlaying' for how this is 
+--   constructed when needed
 data NowPlaying = NowPlaying
     { npState  :: String
     , npTitle  :: String
@@ -73,7 +75,7 @@ getMPC :: a -> MPC
 getMPC = const MPC
 
 class Yesod m => YesodMPC m where
-    -- | seconds, default is 10, return 0 to disable
+    -- | seconds, default is 1, return 0 to disable
     refreshSpeed :: GHandler s m Int
     refreshSpeed = return 1
 
@@ -108,7 +110,7 @@ withMPD f = do
         Nothing -> MPD.withMPD f
         Just c  -> MPD.withMPDEx (mpdHost c) (mpdPort c) (mpdPassword c) f
 
--- | Return now playing info
+-- | Return now playing info or nothing
 nowPlaying :: YesodMPC m => GHandler MPC m (Maybe NowPlaying)
 nowPlaying = do
     songResp  <- withMPD MPD.currentSong
@@ -448,7 +450,7 @@ formattedPlaylist toMaster limit = do
 --   send invalide upper and lower bounds to the request
 fixBounds :: Int -- ^ pos of currently playing track
           -> Int -- ^ length of current playlist
-          -> Int -- ^ how many lines of context to show (+/- 1)
+          -> Int -- ^ how many lines of context to show
           -> (Int, Int)
 fixBounds pos len limit = let
     lower = pos - limit `div` 2
