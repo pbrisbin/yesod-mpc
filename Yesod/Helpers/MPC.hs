@@ -226,7 +226,15 @@ getStatusR = do
                             return;
                         }
 
-                        // if we get here, update the time elapsed
+                        // update state if needed
+                        xState   = xmlHelper(xmlDoc, "state");
+                        curState = docHelper(false, "mpc_state", "");
+
+                        if (xState != curState) {
+                            docHelper(true, "mpc_state", xState);
+                        }
+
+                        // always update time
                         xCur = xmlHelper(xmlDoc, "cur");
                         docHelper(true, "mpc_cur", xCur)
                     }
