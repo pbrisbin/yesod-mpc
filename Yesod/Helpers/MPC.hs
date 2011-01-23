@@ -168,6 +168,9 @@ getStatusR = do
                 padding-left:  5px
                 padding-right: 5px
 
+            .mpc_elapsed
+                float: right
+
             tr.mpc_current
                 font-weight: bold
 
@@ -288,15 +291,16 @@ getStatusR = do
                             %span#mpc_state  $npState.np$
                             \ / 
                             %span#mpc_artist $npArtist.np$
-                            \ -
+                            \ - 
                             %span#mpc_album  $npAlbum.np$
                             \ (
                             %span#mpc_year   $npYear.np$
-                            ) - [ 
-                            %span#mpc_cur    $prettyTimeD.fst.npTime.np$
-                            \ / 
-                            %span#mpc_tot    $prettyTimeI.snd.npTime.np$
-                            \ ]
+                            )
+
+                            %span.mpc_elapsed
+                                %span#mpc_cur    $prettyTimeD.fst.npTime.np$
+                                \ / 
+                                %span#mpc_tot    $prettyTimeI.snd.npTime.np$
 
                         %p
                             %span#mpc_title $npTitle.np$
