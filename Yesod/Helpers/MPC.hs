@@ -38,7 +38,6 @@ module Yesod.Helpers.MPC
 
 import Yesod
 
-import Text.Hamlet
 import Control.Monad (liftM)
 import Data.Maybe (fromMaybe)
 import Language.Haskell.TH.Syntax hiding (lift)
@@ -131,76 +130,30 @@ nowPlaying = do
                     MPD.Stopped -> "stopped"
                 , npPos    = fromMaybe 0 . fmap fst $ MPD.sgIndex song
                 , npId     = fromMaybe 0 . fmap snd $ MPD.sgIndex song
-                , npCur    = format . round . fst $ MPD.stTime state
+                , npCur    = format . round .               fst $ MPD.stTime state
                 , npTot    = format . round . fromInteger . snd $ MPD.stTime state
                 }
         -- todo: make this an Either and return the error(s)
-        otherwise -> return Nothing
+        _ -> return Nothing
     where
-        -- convert seconds to M:SS handling both Double and Integer types
+        -- convert seconds to MM:SS handling both Double and Integer types
         format n = let minutes = n `div` 60
-                       left    = n `mod` 60 in (pad minutes) ++ ":" ++ (pad left)
+                       left    = n `mod` 60 in pad minutes ++ ":" ++ pad left
         pad = (\s -> if length s == 1 then '0': s else s) . show
 
+-- Routes {{{
 -- | This is the main landing page. present now playing info and simple 
 --   prev, pause, next controls. todo:s include playlist and library 
 --   support, more advanced controls, maybe some album art
 getStatusR :: YesodMPC m => GHandler MPC m RepHtml
 getStatusR = do
     authHelper
-    delay    <- liftM (*1000) refreshSpeed
     toMaster <- getRouteToMaster
-    playing  <- getNowPlaying
-    playlist <- formattedPlaylist toMaster 10
-    controls <- playerControls toMaster
+    delay    <- liftM (*1000) refreshSpeed
     defaultLayout $ do
         setTitle $ string "MPD"
 
-        -- some sane styling
-        -- addCassius... {{{
-        addCassius [$cassius|
-            #mpc_title
-                font-weight:  bold
-                font-size:    200%
-                padding-left: 10px
-
-            .mpc_controls table
-                margin-left:    auto
-                margin-right:   auto
-                padding:        5px
-                padding-top:    20px
-                padding-bottom: 20px
-
-            .mpc_playlist table
-                margin-left:  auto
-                margin-right: auto
-
-            .mpc_playlist th
-                border-bottom: solid 1px
-
-            .mpc_playlist td
-                padding-left:  5px
-                padding-right: 5px
-
-            .mpc_elapsed
-                float: right
-
-            tr.mpc_current
-                font-weight: bold
-
-            td.mpc_playlist_button
-                text-align: center
-                font-size:  75%
-                width:      20px
-
-            .mpc a:link, .mpc a:visited, .mpc a:hover
-                outline:         none
-                text-decoration: none
-            |]
-        -- }}}
-
-        -- refresh functionionality
-        -- addJulius... {{{
+        -- ajax-powerd refresh {{{
         addJulius [$julius|
             var xmlhttp = new XMLHttpRequest();
 
@@ -272,47 +225,16 @@ getStatusR = do
         -- }}}
 
         -- page content
-        addHamlet [$hamlet| 
-            .mpc
-                %h1 MPD 
+        addHamlet [$hamlet| %h1 MPD |]
+        nowPlayingWidget
+        playListWidget 10
+        playerControlsWidget
 
-                ^playing^
-                ^playlist^
-                ^controls^
-
-                %script
-                    window.onload = timedRefresh;
-                %noscript
-                    %em note: javascript is required for auto-refresh
+        addHamlet [$hamlet|
+            %script window.onload = timedRefresh;
+            %noscript
+                note: javascript is required for screen updates.
             |]
-    where
-        getNowPlaying :: YesodMPC m => GHandler MPC m (Hamlet a)
-        getNowPlaying = do
-            result <- nowPlaying
-            case result of
-                Nothing -> return [$hamlet| %em N/A |]
-                Just np -> return [$hamlet|
-                    .mpc_nowplaying
-                        %p
-                            %span#mpc_pos!style="display: none;" $show.npPos.np$
-                            %span#mpc_id!style="display: none;"  $show.npId.np$
-
-                            %span#mpc_state  $npState.np$
-                            \ / 
-                            %span#mpc_artist $npArtist.np$
-                            \ - 
-                            %span#mpc_album  $npAlbum.np$
-                            \ (
-                            %span#mpc_year   $npYear.np$
-                            )
-
-                            %span.mpc_elapsed
-                                %span#mpc_cur    $npCur.np$
-                                \ / 
-                                %span#mpc_tot    $npTot.np$
-                        %p
-                            %span#mpc_title $npTitle.np$
-                    |]
 
 -- | Previous
 getPrevR :: YesodMPC m => GHandler MPC m RepHtml
@@ -352,7 +274,9 @@ actionRoute f = do
     _        <- withMPD f
     redirect RedirectTemporary $ toMaster StatusR
 
--- | Return now playing information as xml for an AJAX request
+-- | Return now playing information as xml for an AJAX request. Note 
+--   that this request is not authenticated even if you set an 
+--   'authHelper'.
 getCheckR :: YesodMPC m => GHandler MPC m RepXml
 getCheckR = do
     result <- nowPlaying
@@ -377,47 +301,124 @@ getCheckR = do
                 %cur    $npCur.np$
                 %tot    $npTot.np$
             |]
+-- }}}
+
+-- Widgets {{{
+nowPlayingWidget :: YesodMPC m => GWidget MPC m ()
+nowPlayingWidget = do
+    addCassius [$cassius|
+        #mpc_title
+            font-weight:  bold
+            font-size:    200%
+            padding-left: 10px
+
+        .mpc_elapsed
+            float: right
+        |]
+
+    result <- liftHandler nowPlaying
+    case result of
+        Nothing -> addHamlet [$hamlet| %em N/A |]
+        Just np -> addHamlet [$hamlet|
+            .mpc_nowplaying
+                %p
+                    %span#mpc_pos!style="display: none;" $show.npPos.np$
+                    %span#mpc_id!style="display: none;"  $show.npId.np$
+
+                    %span#mpc_state  $npState.np$
+                    \ / 
+                    %span#mpc_artist $npArtist.np$
+                    \ - 
+                    %span#mpc_album  $npAlbum.np$
+                    \ (
+                    %span#mpc_year   $npYear.np$
+                    )
+
+                    %span.mpc_elapsed
+                        %span#mpc_cur    $npCur.np$
+                        \ / 
+                        %span#mpc_tot    $npTot.np$
+                %p
+                    %span#mpc_title $npTitle.np$
+            |]
 
 -- | The control links themselves
-playerControls :: (YesodMPC m, HamletValue a) => (MPCRoute -> HamletUrl a) -> GHandler MPC m a
-playerControls toMaster = return [$hamlet|
-    .mpc_controls
-        %table
-            %tr
-                %td
-                    %a!href=@toMaster.PrevR@  [ << ]
-                %td
-                    %a!href=@toMaster.PauseR@ [ || ]
-                %td
-                    %a!href=@toMaster.NextR@  [ >> ]
-    |]
+playerControlsWidget :: YesodMPC m => GWidget MPC m ()
+playerControlsWidget = do
+    addCassius [$cassius|
+        .mpc_controls table
+            margin-left:    auto
+            margin-right:   auto
+            padding:        5px
+            padding-top:    20px
+            padding-bottom: 20px
+
+        .mpc_controls a:link, .mpc_controls a:visited, .mpc_controls a:hover
+            outline:         none
+            text-decoration: none
+        |]
+
+    toMaster <- liftHandler getRouteToMaster
+    addHamlet [$hamlet|
+        .mpc_controls
+            %table
+                %tr
+                    %td
+                        %a!href=@toMaster.PrevR@  [ << ]
+                    %td
+                        %a!href=@toMaster.PauseR@ [ || ]
+                    %td
+                        %a!href=@toMaster.NextR@  [ >> ]
+        |]
 
 -- | A formatted play list, limited, auto-centered/highlighted on now 
 --   playing, and with links to play and remove the entries
-formattedPlaylist :: (YesodMPC m, HamletValue a)
-                  => (MPCRoute -> HamletUrl a) -- ^ route to master
-                  -> Int                       -- ^ limit display
-                  -> GHandler MPC m a
-formattedPlaylist toMaster limit = do
-    -- position and id of currently playing song
-    (pos,cid) <- liftM (fromMaybe (0,0)) currentId
+playListWidget :: YesodMPC m
+                  => Int -- ^ limit display
+                  -> GWidget MPC m ()
+playListWidget limit = do
+    addCassius [$cassius|
+        .mpc_playlist table
+            margin-left:  auto
+            margin-right: auto
 
-    -- length of current playlist
-    len <- do 
-        -- length of current playlist
-        result <- withMPD $ MPD.playlistInfo Nothing
-        case result of
-            Left _      -> return 0
-            Right songs -> return $ length songs
+        .mpc_playlist th
+            border-bottom: solid 1px
+
+        .mpc_playlist td
+            padding-left:  5px
+            padding-right: 5px
+
+        tr.mpc_current
+            font-weight: bold
+
+        td.mpc_playlist_button
+            text-align: center
+            font-size:  75%
+            width:      20px
+
+        .mpc_playlist a:link, .mpc_playlist a:visited, .mpc_playlist a:hover
+            outline:         none
+            text-decoration: none
+        |]
+
+    toMaster  <- liftHandler getRouteToMaster
+    (pos,cid) <- liftM (fromMaybe (0,0)) $ liftHandler currentId
+    result    <- liftHandler . withMPD $ MPD.playlistInfo Nothing
+
+    let len = case result of
+            Left _      -> 0
+            Right songs -> length songs
 
     -- find bounds to show len lines of context
     let (lower,upper) = fixBounds pos len limit
 
     -- get the limited, auto-centered playlist records
-    result <- withMPD $ MPD.playlistInfo (Just (lower, upper))
-    case result of
-        Left err    -> return [$hamlet| %em $string.show.err$ |]
-        Right songs -> return [$hamlet|
+    result' <- liftHandler . withMPD $ MPD.playlistInfo (Just (lower, upper))
+
+    case result' of
+        Left err    -> addHamlet [$hamlet| %em $string.show.err$ |]
+        Right songs -> addHamlet [$hamlet|
             .mpc_playlist
                 %table
                     %tr
@@ -435,20 +436,22 @@ formattedPlaylist toMaster limit = do
                     title  = getTag MPD.Title  song
                     pid    = fromMaybe 0 . fmap snd $ MPD.sgIndex song
                     in [$hamlet| 
-                    %tr.$clazz.pid$
-                        %td $string.show.pid$
-                        %td $artist$
-                        %td $title$
-                        %td.mpc_playlist_button
-                            %a!href=@toMaster.PlayR.pid@ |>
-                        %td.mpc_playlist_button
-                            %a!href=@toMaster.DelR.pid@  X
-                    |]
-                    where
-                        clazz x = if x == cid
-                            then string "mpc_current"
-                            else string "mpc_not_current"
+                        %tr.$clazz.pid$
+                            %td $string.show.pid$
+                            %td $artist$
+                            %td $title$
+                            %td.mpc_playlist_button
+                                %a!href=@toMaster.PlayR.pid@ |>
+                            %td.mpc_playlist_button
+                                %a!href=@toMaster.DelR.pid@  X
+                        |]
 
+                clazz x = if x == cid
+                    then string "mpc_current"
+                    else string "mpc_not_current"
+-- }}}
+
+-- Helpers {{{
 -- | Show playlist context with now playing centered but ensure we don't 
 --   send invalide upper and lower bounds to the request
 fixBounds :: Int -- ^ pos of currently playing track
@@ -479,3 +482,4 @@ currentId = do
 --   return "N/A" if it's not found
 getTag :: MPD.Metadata -> MPD.Song -> String
 getTag tag = head . M.findWithDefault ["N/A"] tag . MPD.sgTags
+-- }}
