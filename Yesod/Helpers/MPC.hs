@@ -1,6 +1,7 @@
 {-# LANGUAGE QuasiQuotes           #-}
 {-# LANGUAGE TemplateHaskell       #-}
 {-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 -------------------------------------------------------------------------------
@@ -50,6 +51,15 @@ import qualified Network.MPD as MPD
 --debug :: (YesodMPC m) => String -> GHandler s m ()
 --debug = liftIO . hPutStrLn stderr
 
+data NowPlaying = NowPlaying
+    { npState  :: String
+    , npTitle  :: String
+    , npArtist :: String
+    , npAlbum  :: String
+    , npTime   :: (Double,MPD.Seconds)
+    , npYear   :: String
+    }
+
 -- | Customize your connection to MPD
 data MpdConfig = MpdConfig
     { mpdHost     :: MPD.Host
@@ -65,7 +75,7 @@ getMPC = const MPC
 class Yesod m => YesodMPC m where
     -- | seconds, default is 10, return 0 to disable
     refreshSpeed :: GHandler s m Int
-    refreshSpeed = return 10
+    refreshSpeed = return 1
 
     -- | default is Nothing, standard connection
     mpdConfig :: GHandler s m (Maybe MpdConfig)
@@ -83,8 +93,10 @@ mkYesodSub "MPC"
     /prev        PrevR   GET
     /pause       PauseR  GET
     /next        NextR   GET
-    /play/#Int   PlayR GET
-    /delete/#Int DelR  GET
+    /play/#Int   PlayR   GET
+    /delete/#Int DelR    GET
+
+    /np          NowPlayingR GET
     |]
 
 -- | Wrap MPD.withMPD or MPD.withMPDEx depending on the users mpd 
@@ -95,6 +107,26 @@ withMPD f = do
     liftIO $ case config of
         Nothing -> MPD.withMPD f
         Just c  -> MPD.withMPDEx (mpdHost c) (mpdPort c) (mpdPassword c) f
+
+-- | Return now playing info
+nowPlaying :: YesodMPC m => GHandler MPC m (Maybe NowPlaying)
+nowPlaying = do
+    songResp  <- withMPD MPD.currentSong
+    stateResp <- withMPD MPD.status
+    case (songResp,stateResp) of
+        (Right (Just song), Right state) -> return $ 
+            Just NowPlaying
+                { npTitle  = getTag MPD.Title song
+                , npArtist = getTag MPD.Artist song
+                , npAlbum  = getTag MPD.Album song
+                , npYear   = getTag MPD.Date song
+                , npTime   = MPD.stTime state
+                , npState  = case MPD.stState state of
+                    MPD.Playing -> "playing"
+                    MPD.Paused  -> "paused"
+                    MPD.Stopped -> "stopped"
+                }
+        otherwise -> return Nothing
 
 -- | This is the main landing page. present now playing info and simple 
 --   prev, pause, next controls. todo:s include playlist and library 
@@ -113,70 +145,159 @@ getStatusR = do
         -- some sane styling
         -- addCassius... {{{
         addCassius [$cassius|
-        .mpc_title
-            font-weight:  bold
-            font-size:    200%
-            padding-left: 10px
+            #mpc_title
+                font-weight:  bold
+                font-size:    200%
+                padding-left: 10px
 
-        .mpc_controls table
-            margin-left:    auto
-            margin-right:   auto
-            padding:        5px
-            padding-top:    20px
-            padding-bottom: 20px
+            .mpc_controls table
+                margin-left:    auto
+                margin-right:   auto
+                padding:        5px
+                padding-top:    20px
+                padding-bottom: 20px
 
-        .mpc_playlist table
-            margin-left:  auto
-            margin-right: auto
+            .mpc_playlist table
+                margin-left:  auto
+                margin-right: auto
 
-        .mpc_playlist th
-            border-bottom: solid 1px
+            .mpc_playlist th
+                border-bottom: solid 1px
 
-        .mpc_playlist td
-            padding-left:  5px
-            padding-right: 5px
+            .mpc_playlist td
+                padding-left:  5px
+                padding-right: 5px
 
-        tr.mpc_current
-            font-weight: bold
+            tr.mpc_current
+                font-weight: bold
 
-        td.mpc_playlist_button
-            text-align: center
-            font-size:  75%
-            width:      20px
+            td.mpc_playlist_button
+                text-align: center
+                font-size:  75%
+                width:      20px
 
-        .mpc a:link, .mpc a:visited, .mpc a:hover
-            outline:         none
-            text-decoration: none
-        |]
+            .mpc a:link, .mpc a:visited, .mpc a:hover
+                outline:         none
+                text-decoration: none
+            |]
         -- }}}
 
-        -- auto refresh function
-        if delay /= 0
-            then addJulius [$julius|
-                function timedRefresh() {
-                    setTimeout("location.reload(true);", %show.delay%);
+        -- refresh functionionality
+        -- addJulius... {{{
+        addJulius [$julius|
+            var xmlhttp = new XMLHttpRequest();
+
+            // handle the callback
+            xmlhttp.onreadystatechange = function()
+            {
+                if (xmlhttp.readyState == 4 && xmlhttp.status == 200)
+                {
+                    xmlDoc = xmlhttp.responseXML;
+
+                    curTitle = document.getElementById("mpc_title" ).innerHTML;
+                    title    = xmlDoc.getElementsByTagName("title")[0].childNodes[0].nodeValue;
+
+                    if (title == curTitle)
+                    {
+                        // track hasn't changed, just update the screen
+                        artist = xmlDoc.getElementsByTagName("artist")[0].childNodes[0].nodeValue;
+                        album  = xmlDoc.getElementsByTagName("album" )[0].childNodes[0].nodeValue;
+                        year   = xmlDoc.getElementsByTagName("year"  )[0].childNodes[0].nodeValue;
+                        state  = xmlDoc.getElementsByTagName("state" )[0].childNodes[0].nodeValue;
+                        cur    = xmlDoc.getElementsByTagName("cur"   )[0].childNodes[0].nodeValue;
+                        tot    = xmlDoc.getElementsByTagName("tot"   )[0].childNodes[0].nodeValue;
+
+                        document.getElementById("mpc_title" ).innerHTML = title;
+                        document.getElementById("mpc_artist").innerHTML = artist;
+                        document.getElementById("mpc_album" ).innerHTML = album;
+                        document.getElementById("mpc_year"  ).innerHTML = year;
+                        document.getElementById("mpc_state" ).innerHTML = state;
+                        document.getElementById("mpc_cur"   ).innerHTML = prettyTime(cur);
+                        document.getElementById("mpc_tot"   ).innerHTML = prettyTime(tot);
+                    }
+                    else
+                    {
+                        // track's changed, refresh the whole page
+                        location.reload(true);
+                    }
                 }
-                |]
-            else addJulius [$julius|
-                function timedRefrehs() {
-                    ; // no-op
-                }
-                |]
+            }
+
+            // print seconds has M:SS
+            function prettyTime(seconds) {
+                var left    = seconds %% 60
+                var minutes = (seconds - left) / 60
+
+                if (left >= 0)
+                    left = Math.floor(left);
+                else
+                    left = Math.ceil(left);
+
+                return Math.round(minutes) + ":" + left;
+            }
+
+            // ask the server for updated now playing info
+            function getNowPlaying() {
+                xmlhttp.open("GET", "@toMaster.NowPlayingR@", true);
+                xmlhttp.send();
+                timedRefresh();
+            }
+
+            // setup the refresh if delay is non-zero
+            function timedRefresh() {
+                var delay = %show.delay%;
+
+                if (delay != 0)
+                    setTimeout("getNowPlaying();", delay);
+            }
+            |]
+        -- }}}
 
         -- page content
         addHamlet [$hamlet| 
-        .mpc
-            %h1 MPD 
+            .mpc
+                %h1 MPD 
 
-            ^playing^
-            ^playlist^
-            ^controls^
+                ^playing^
+                ^playlist^
+                ^controls^
 
-            %script
-                window.onload = timedRefresh;
-            %noscript
-                %em note: javascript is required for auto-refresh
-        |]
+                %script
+                    window.onload = timedRefresh;
+                %noscript
+                    %em note: javascript is required for auto-refresh
+            |]
+    where
+        getNowPlaying :: YesodMPC m => GHandler MPC m (Hamlet a)
+        getNowPlaying = do
+            result <- nowPlaying
+            case result of
+                Nothing -> return [$hamlet| %em N/A |]
+                Just np -> return [$hamlet|
+                    .mpc_nowplaying
+                        %p
+                            %span#mpc_state  $npState.np$
+                            \ / 
+                            %span#mpc_artist $npArtist.np$
+                            \ -
+                            %span#mpc_album  $npAlbum.np$
+                            \ (
+                            %span#mpc_year   $npYear.np$
+                            ) - [ 
+                            %span#mpc_cur    $prettyTimeD.fst.npTime.np$
+                            \ / 
+                            %span#mpc_tot    $prettyTimeI.snd.npTime.np$
+                            \ ]
+
+                        %p
+                            %span#mpc_title $npTitle.np$
+                    |]
+
+        -- convert seconds to M:SS handling both Double and Integer types
+        prettyTimeD  n = prettyTime round n
+        prettyTimeI  n = prettyTime (round . fromInteger) n
+        prettyTime f n = let minutes = f n `div` 60
+                             left    = f n `mod` 60 in (show minutes) ++ ":" ++ (show left)
 
 -- | Previous
 getPrevR :: YesodMPC m => GHandler MPC m RepHtml
@@ -216,47 +337,26 @@ actionRoute f = do
     _        <- withMPD f
     redirect RedirectTemporary $ toMaster StatusR
 
--- | Return formatted now playing information
-getNowPlaying :: YesodMPC m => GHandler MPC m (Hamlet a)
-getNowPlaying = do
-    result <- withMPD MPD.currentSong
-    state  <- getCurrentState
-    case result of
-        Left err          -> return [$hamlet| %em $string.show.err$ |]
-        Right Nothing     -> return [$hamlet| %em -/-               |]
-        Right (Just song) -> return $ formatState state song
-    where
-        -- output state
-        getCurrentState :: YesodMPC m => GHandler MPC m String
-        getCurrentState = do
-            result <- withMPD MPD.status
-            case result of
-                Left err     -> return $ show err
-                Right status -> case MPD.stState status of
-                    MPD.Playing -> return "playing"
-                    MPD.Stopped -> return "stopped"
-                    MPD.Paused  -> return "paused"
-
-        -- parse a Songs metatdata into a table
-        formatState :: String -> MPD.Song -> Hamlet a
-        formatState state song = let 
-            title  = getTag MPD.Title  song
-            artist = getTag MPD.Artist song
-            album  = getTag MPD.Album  song
-            year   = getTag MPD.Date   song
-            in [$hamlet|
-            .mpc_nowplaying
-                %p
-                    %span.mpc_state  $state$
-                    \ / 
-                    %span.mpc_artist $artist$
-                    \ - 
-                    %span.mpc_album  $album$
-                    \ 
-                    %span.mpc_year   ($year$)
-
-                %p
-                    %span.mpc_title $title$
+-- | Return now playing information as xml for an AJAX request
+getNowPlayingR :: YesodMPC m => GHandler MPC m RepXml
+getNowPlayingR = do
+    result <- nowPlaying
+    fmap RepXml . hamletToContent $ case result of
+        Nothing -> [$xhamlet|
+            \<?xml version="1.0"?>
+            %error MPD threw an error
+            |]
+        Just np -> [$xhamlet|
+            \<?xml version="1.0"?>
+            %xml
+                %playing
+                    %state  $npState.np$
+                    %title  $npTitle.np$
+                    %artist $npArtist.np$
+                    %album  $npAlbum.np$
+                    %year   $npYear.np$
+                    %cur    $show.fst.npTime.np$
+                    %tot    $show.snd.npTime.np$
             |]
 
 -- | The control links themselves
@@ -358,5 +458,5 @@ currentId = do
 
 -- | Get the first instance of the given tag in the the passed song, 
 --   return "N/A" if it's not found
-getTag :: MPD.Metadata -> MPD.Song -> Html
-getTag tag = string . head . M.findWithDefault ["N/A"] tag . MPD.sgTags
+getTag :: MPD.Metadata -> MPD.Song -> String
+getTag tag = head . M.findWithDefault ["N/A"] tag . MPD.sgTags
