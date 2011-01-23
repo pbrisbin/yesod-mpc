@@ -52,14 +52,17 @@ import qualified Network.MPD as MPD
 --debug = liftIO . hPutStrLn stderr
 
 -- | Represents now playing state, see 'nowPlaying' for how this is 
---   constructed when needed
+--   constructed when needed.
 data NowPlaying = NowPlaying
     { npState  :: String
     , npTitle  :: String
     , npArtist :: String
     , npAlbum  :: String
-    , npTime   :: (Double,MPD.Seconds)
     , npYear   :: String
+    , npPos    :: Int    -- ^ position in playlist
+    , npId     :: Int    -- ^ playlist id
+    , npCur    :: String -- ^ time elapsed, MM:SS
+    , npTot    :: String -- ^ song length, MM:SS
     }
 
 -- | Customize your connection to MPD
@@ -98,7 +101,7 @@ mkYesodSub "MPC"
     /play/#Int   PlayR   GET
     /delete/#Int DelR    GET
 
-    /np          NowPlayingR GET
+    /statecheck.xml CheckR GET
     |]
 
 -- | Wrap MPD.withMPD or MPD.withMPDEx depending on the users mpd 
@@ -122,13 +125,22 @@ nowPlaying = do
                 , npArtist = getTag MPD.Artist song
                 , npAlbum  = getTag MPD.Album song
                 , npYear   = getTag MPD.Date song
-                , npTime   = MPD.stTime state
                 , npState  = case MPD.stState state of
                     MPD.Playing -> "playing"
                     MPD.Paused  -> "paused"
                     MPD.Stopped -> "stopped"
+                , npPos    = fromMaybe 0 . fmap fst $ MPD.sgIndex song
+                , npId     = fromMaybe 0 . fmap snd $ MPD.sgIndex song
+                , npCur    = format . round . fst $ MPD.stTime state
+                , npTot    = format . round . fromInteger . snd $ MPD.stTime state
                 }
+        -- todo: make this an Either and return the error(s)
         otherwise -> return Nothing
+    where
+        -- convert seconds to M:SS handling both Double and Integer types
+        format n = let minutes = n `div` 60
+                       left    = n `mod` 60 in (pad minutes) ++ ":" ++ (pad left)
+        pad = (\s -> if length s == 1 then '0': s else s) . show
 
 -- | This is the main landing page. present now playing info and simple 
 --   prev, pause, next controls. todo:s include playlist and library 
@@ -197,67 +209,51 @@ getStatusR = do
             {
                 if (xmlhttp.readyState == 4 && xmlhttp.status == 200)
                 {
-                    xmlDoc = xmlhttp.responseXML;
-
-                    curTitle = document.getElementById("mpc_title" ).innerHTML;
-                    title    = xmlDoc.getElementsByTagName("title")[0].childNodes[0].nodeValue;
-
-                    if (title == curTitle)
+                    xmlDoc  = xmlhttp.responseXML;
+                    xStatus = xmlHelper(xmlDoc, "status");
+                    
+                    if (xStatus == "OK")
                     {
-                        // track hasn't changed, just update the screen
-                        artist = xmlDoc.getElementsByTagName("artist")[0].childNodes[0].nodeValue;
-                        album  = xmlDoc.getElementsByTagName("album" )[0].childNodes[0].nodeValue;
-                        year   = xmlDoc.getElementsByTagName("year"  )[0].childNodes[0].nodeValue;
-                        state  = xmlDoc.getElementsByTagName("state" )[0].childNodes[0].nodeValue;
-                        cur    = xmlDoc.getElementsByTagName("cur"   )[0].childNodes[0].nodeValue;
-                        tot    = xmlDoc.getElementsByTagName("tot"   )[0].childNodes[0].nodeValue;
+                        xPos = xmlHelper(xmlDoc, "pos");
+                        xId  = xmlHelper(xmlDoc, "id");
 
-                        document.getElementById("mpc_title" ).innerHTML = title;
-                        document.getElementById("mpc_artist").innerHTML = artist;
-                        document.getElementById("mpc_album" ).innerHTML = album;
-                        document.getElementById("mpc_year"  ).innerHTML = year;
-                        document.getElementById("mpc_state" ).innerHTML = state;
-                        document.getElementById("mpc_cur"   ).innerHTML = prettyTime(cur);
-                        document.getElementById("mpc_tot"   ).innerHTML = prettyTime(tot);
-                    }
-                    else
-                    {
-                        // track's changed, refresh the whole page
-                        location.reload(true);
+                        curPos = docHelper(false, "mpc_pos", "");
+                        curId  = docHelper(false, "mpc_id",  "");
+
+                        if (xPos != curPos || xId != curId) {
+                            // track changed, reload
+                            location.reload(true);
+                            return;
+                        }
+
+                        // if we get here, update the time elapsed
+                        xCur = xmlHelper(xmlDoc, "cur");
+                        docHelper(true, "mpc_cur", xCur)
                     }
                 }
             }
 
-            function pad(num) {
-                var padded = num + "";
-
-                while (padded.length < 2)
-                    padded = "0" + padded
-
-                return padded;
+            /* return the content of an xml tag */
+            function xmlHelper(_xmlDoc, _tag) {
+                return _xmlDoc.getElementsByTagName(_tag)[0].childNodes[0].nodeValue;
             }
 
-            // print seconds has M:SS
-            function prettyTime(seconds) {
-                var left    = seconds %% 60
-                var minutes = (seconds - left) / 60
-
-                if (left >= 0)
-                    left = Math.floor(left);
-                else
-                    left = Math.ceil(left);
-
-                return pad(Math.round(minutes)) + ":" + pad(left);
+            /* set and get a document tag's inner value */
+            function docHelper(_set, _id, _value) {
+                if (_set) {
+                    document.getElementById(_id).innerHTML = _value;
+                }
+                return document.getElementById(_id).innerHTML;
             }
 
-            // ask the server for updated now playing info
+            /* ask the server for updated now playing info */
             function getNowPlaying() {
-                xmlhttp.open("GET", "@toMaster.NowPlayingR@", true);
+                xmlhttp.open("GET", "@toMaster.CheckR@", true);
                 xmlhttp.send();
                 timedRefresh();
             }
 
-            // setup the refresh if delay is non-zero
+            /* setup the refresh if delay is non-zero */
             function timedRefresh() {
                 var delay = %show.delay%;
 
@@ -290,6 +286,9 @@ getStatusR = do
                 Just np -> return [$hamlet|
                     .mpc_nowplaying
                         %p
+                            %span#mpc_pos!style="display: none;" $show.npPos.np$
+                            %span#mpc_id!style="display: none;"  $show.npId.np$
+
                             %span#mpc_state  $npState.np$
                             \ / 
                             %span#mpc_artist $npArtist.np$
@@ -300,20 +299,12 @@ getStatusR = do
                             )
 
                             %span.mpc_elapsed
-                                %span#mpc_cur    $prettyTimeD.fst.npTime.np$
+                                %span#mpc_cur    $npCur.np$
                                 \ / 
-                                %span#mpc_tot    $prettyTimeI.snd.npTime.np$
-
+                                %span#mpc_tot    $npTot.np$
                         %p
                             %span#mpc_title $npTitle.np$
                     |]
-
-        -- convert seconds to M:SS handling both Double and Integer types
-        prettyTimeD  n = prettyTime round n
-        prettyTimeI  n = prettyTime (round . fromInteger) n
-        prettyTime f n = let minutes = f n `div` 60
-                             left    = f n `mod` 60 in (pad $ show minutes) ++ ":" ++ (pad $ show left)
-        pad s = if length s == 1 then '0':s else s
 
 -- | Previous
 getPrevR :: YesodMPC m => GHandler MPC m RepHtml
@@ -354,25 +345,29 @@ actionRoute f = do
     redirect RedirectTemporary $ toMaster StatusR
 
 -- | Return now playing information as xml for an AJAX request
-getNowPlayingR :: YesodMPC m => GHandler MPC m RepXml
-getNowPlayingR = do
+getCheckR :: YesodMPC m => GHandler MPC m RepXml
+getCheckR = do
     result <- nowPlaying
     fmap RepXml . hamletToContent $ case result of
         Nothing -> [$xhamlet|
-            \<?xml version="1.0"?>
-            %error MPD threw an error
+            \<?xml version="1.0" encoding="utf-8"?>
+            %xml
+                %status ERR
+                %error  MPD threw an error
             |]
         Just np -> [$xhamlet|
-            \<?xml version="1.0"?>
+            \<?xml version="1.0" encoding="utf-8"?>
             %xml
-                %playing
-                    %state  $npState.np$
-                    %title  $npTitle.np$
-                    %artist $npArtist.np$
-                    %album  $npAlbum.np$
-                    %year   $npYear.np$
-                    %cur    $show.fst.npTime.np$
-                    %tot    $show.snd.npTime.np$
+                %status OK
+                %state  $npState.np$
+                %title  $npTitle.np$
+                %artist $npArtist.np$
+                %album  $npAlbum.np$
+                %year   $npYear.np$
+                %pos    $show.npPos.np$
+                %id     $show.npId.np$
+                %cur    $npCur.np$
+                %tot    $npTot.np$
             |]
 
 -- | The control links themselves
