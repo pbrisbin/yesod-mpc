@@ -62,6 +62,7 @@ data NowPlaying = NowPlaying
     , npId     :: Int    -- ^ playlist id
     , npCur    :: String -- ^ time elapsed, MM:SS
     , npTot    :: String -- ^ song length, MM:SS
+    , npProg   :: Int    -- ^ percentage elapsed for convenience
     }
 
 -- | Customize your connection to MPD
@@ -130,8 +131,9 @@ nowPlaying = do
                     MPD.Stopped -> "stopped"
                 , npPos    = fromMaybe 0 . fmap fst $ MPD.sgIndex song
                 , npId     = fromMaybe 0 . fmap snd $ MPD.sgIndex song
-                , npCur    = format . round .               fst $ MPD.stTime state
-                , npTot    = format . round . fromInteger . snd $ MPD.stTime state
+                , npCur    = format . round . fst $ MPD.stTime state
+                , npTot    = format .         snd $ MPD.stTime state
+                , npProg   = progress $ MPD.stTime state
                 }
         -- todo: make this an Either and return the error(s)
         _ -> return Nothing
@@ -139,6 +141,8 @@ nowPlaying = do
         -- convert seconds to MM:SS
         format = (\(q,r) -> pad q ++ ":" ++ pad r) . flip divMod 60
         pad    = (\s -> if length s == 1 then '0':s else s) . show
+
+        progress (d,i) = round $ d / realToFrac i
 
 -- Routes {{{
 -- | This is the main landing page. present now playing info and simple 
