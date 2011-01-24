@@ -34,6 +34,12 @@ module Yesod.Helpers.MPC
     , getMPC
     , YesodMPC(..)
     , MpdConfig(..)
+    -- * Widgets
+    -- $widgets
+    , progressBarWidget
+    , nowPlayingWidget
+    , playListWidget
+    , playerControlsWidget
     ) where
 
 import Yesod
@@ -67,8 +73,8 @@ data NowPlaying = NowPlaying
 
 -- | Customize your connection to MPD
 data MpdConfig = MpdConfig
-    { mpdHost     :: MPD.Host
-    , mpdPort     :: MPD.Port
+    { mpdHost     :: MPD.Host -- ^ String
+    , mpdPort     :: MPD.Port -- ^ Int
     , mpdPassword :: String
     }
 
@@ -182,19 +188,19 @@ getStatusR = do
                             return;
                         }
 
-                        // update state if needed
-                        xState   = xmlHelper(xmlDoc, "state");
-                        curState = docHelper(false, "mpc_state", "");
-
-                        if (xState != curState) {
-                            docHelper(true, "mpc_state", xState);
+                        // update state
+                        if (typeof updateState == 'function') {
+                            xState = xmlHelper(xmlDoc, "state");
+                            updateState(xState);
                         }
 
-                        // always update time
-                        xCur = xmlHelper(xmlDoc, "cur");
-                        docHelper(true, "mpc_cur", xCur)
+                        // update time
+                        if (typeof updateElapsedTime == 'function') {
+                            xCur = xmlHelper(xmlDoc, "cur");
+                            updateElapsedTime(xCur);
+                        }
 
-                        // update a progress bar if defined
+                        // update progress bar
                         if (typeof updateProgressBar == 'function') {
                             xProg = xmlHelper(xmlDoc, "progress");
                             updateProgressBar(xProg);
@@ -314,9 +320,47 @@ getCheckR = do
             |]
 -- }}}
 
--- Widgets {{{
+-- widgets {{{
+--
+-- $widgets
+--
+-- Some drop-in widgets that you can place on any page. The calling page 
+-- is required to make any Ajax requests and call the update functions 
+-- provided by the widgets.
+--
+
+-- | Show now playing info. You must call @updateState(_state);@ and 
+--   @udpateElapsedTime(_time);@ from your Ajax handler.
 nowPlayingWidget :: YesodMPC m => GWidget MPC m ()
 nowPlayingWidget = do
+    addJulius [$julius|
+        if (typeof docHelper != 'function') {
+            // define this if it's not here already
+            function docHelper(_set, _id, _value) {
+                if (_set) {
+                    document.getElementById(_id).innerHTML = _value;
+                }
+                return document.getElementById(_id).innerHTML;
+            }
+
+
+        }
+
+        function updateState(_state) {
+            curState = docHelper(false, "mpc_state", "");
+            if (curState != _state) {
+                docHelper(true, "mpc_state", _state);
+            }
+        }
+
+        function updateElapsedTime(_time) {
+            curTime = docHelper(false, "mpc_cur", "");
+            if (curTime != _time) {
+                docHelper(true, "mpc_cur", _time);
+            }
+        }
+        |]
+
     addCassius [$cassius|
         #mpc_title
             font-weight:  bold
@@ -353,7 +397,7 @@ nowPlayingWidget = do
                     %span#mpc_title $npTitle.np$
             |]
 
--- | The control links themselves
+-- | Prev, Play/Pause, Next
 playerControlsWidget :: YesodMPC m => GWidget MPC m ()
 playerControlsWidget = do
     addCassius [$cassius|
@@ -461,10 +505,8 @@ playListWidget limit = do
                     then string "mpc_current"
                     else string "mpc_not_current"
 
--- | Show a \"progress bar\" by changing the width of a hr element in 
---   response to an ajax call. This widget adds the updateProgressBar 
---   javascript function but it's up to the parent page to call it as 
---   needed.
+-- | Show a \"progress bar\" by changing the width of a div element. You 
+--   must call @updateProgressBar(_int);@ from your Ajax handler.
 progressBarWidget :: YesodMPC m => GWidget MPC m ()
 progressBarWidget = do
     addJulius [$julius|
