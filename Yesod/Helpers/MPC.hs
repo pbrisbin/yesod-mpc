@@ -136,10 +136,9 @@ nowPlaying = do
         -- todo: make this an Either and return the error(s)
         _ -> return Nothing
     where
-        -- convert seconds to MM:SS handling both Double and Integer types
-        format n = let minutes = n `div` 60
-                       left    = n `mod` 60 in pad minutes ++ ":" ++ pad left
-        pad = (\s -> if length s == 1 then '0': s else s) . show
+        -- convert seconds to MM:SS
+        format = (\(q,r) -> pad q ++ ":" ++ pad r) . flip divMod 60
+        pad    = (\s -> if length s == 1 then '0':s else s) . show
 
 -- Routes {{{
 -- | This is the main landing page. present now playing info and simple 
