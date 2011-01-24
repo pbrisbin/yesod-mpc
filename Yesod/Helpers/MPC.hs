@@ -534,13 +534,13 @@ fixBounds :: Int -- ^ pos of currently playing track
 fixBounds pos len limit = let
     lower = pos - limit `div` 2
     upper = pos + limit `div` 2
-    in if lower < 0 && upper > len
-        then (0, len)
-        else if lower < 0
-            then fixBounds (limit `div` 2) len limit
-            else if upper > len
-                then fixBounds (pos - (upper - len)) len limit
-                else (lower, upper)
+    in go lower upper
+    where
+        go l u
+            | l < 0 && u > len = (0,len)
+            | l < 0            = fixBounds (limit `div` 2)   len limit
+            | u > len          = fixBounds (pos - (u - len)) len limit
+            | otherwise        = (l,u)
 
 -- | Return maybe the id of the currently playing song
 currentId :: YesodMPC m => GHandler MPC m (Maybe (Int,Int))
