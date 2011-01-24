@@ -62,7 +62,7 @@ data NowPlaying = NowPlaying
     , npId     :: Int    -- ^ playlist id
     , npCur    :: String -- ^ time elapsed, MM:SS
     , npTot    :: String -- ^ song length, MM:SS
-    , npProg   :: Int    -- ^ percentage elapsed for convenience
+    , npProg   :: Integer-- ^ percentage elapsed for convenience
     }
 
 -- | Customize your connection to MPD
@@ -119,7 +119,7 @@ nowPlaying = do
     songResp  <- withMPD MPD.currentSong
     stateResp <- withMPD MPD.status
     case (songResp,stateResp) of
-        (Right (Just song), Right state) -> return $ 
+        (Right (Just song), Right state) -> return $
             Just NowPlaying
                 { npTitle  = getTag MPD.Title song
                 , npArtist = getTag MPD.Artist song
@@ -134,7 +134,7 @@ nowPlaying = do
                 , npCur    = format . round . fst $ MPD.stTime state
                 , npTot    = format .         snd $ MPD.stTime state
                 , npProg   = progress $ MPD.stTime state
-                }
+                } 
         -- todo: make this an Either and return the error(s)
         _ -> return Nothing
     where
@@ -142,7 +142,7 @@ nowPlaying = do
         format = (\(q,r) -> pad q ++ ":" ++ pad r) . flip divMod 60
         pad    = (\s -> if length s == 1 then '0':s else s) . show
 
-        progress (d,i) = round $ d / realToFrac i
+        progress (d,i) = floor $ (*100) (d / realToFrac i)
 
 -- Routes {{{
 -- | This is the main landing page. present now playing info and simple 
@@ -193,6 +193,12 @@ getStatusR = do
                         // always update time
                         xCur = xmlHelper(xmlDoc, "cur");
                         docHelper(true, "mpc_cur", xCur)
+
+                        // update a progress bar if defined
+                        if (typeof updateProgressBar == 'function') {
+                            xProg = xmlHelper(xmlDoc, "progress");
+                            updateProgressBar(xProg);
+                        }
                     }
                 }
             }
@@ -229,6 +235,7 @@ getStatusR = do
 
         -- page content
         addHamlet [$hamlet| %h1 MPD |]
+        progressBarWidget
         nowPlayingWidget
         playListWidget 10
         playerControlsWidget
@@ -293,16 +300,17 @@ getCheckR = do
         Just np -> [$xhamlet|
             \<?xml version="1.0" encoding="utf-8"?>
             %xml
-                %status OK
-                %state  $npState.np$
-                %title  $npTitle.np$
-                %artist $npArtist.np$
-                %album  $npAlbum.np$
-                %year   $npYear.np$
-                %pos    $show.npPos.np$
-                %id     $show.npId.np$
-                %cur    $npCur.np$
-                %tot    $npTot.np$
+                %status   OK
+                %state    $npState.np$
+                %title    $npTitle.np$
+                %artist   $npArtist.np$
+                %album    $npAlbum.np$
+                %year     $npYear.np$
+                %pos      $show.npPos.np$
+                %id       $show.npId.np$
+                %cur      $npCur.np$
+                %tot      $npTot.np$
+                %progress $show.npProg.np$
             |]
 -- }}}
 
@@ -452,6 +460,26 @@ playListWidget limit = do
                 clazz x = if x == cid
                     then string "mpc_current"
                     else string "mpc_not_current"
+
+-- | Show a \"progress bar\" by changing the width of a hr element in 
+--   response to an ajax call. This widget adds the updateProgressBar 
+--   javascript function but it's up to the parent page to call it as 
+--   needed.
+progressBarWidget :: YesodMPC m => GWidget MPC m ()
+progressBarWidget = do
+    addJulius [$julius|
+        function updateProgressBar(_int) {
+            document.getElementById("mpc_progress_bar").style.width = _int + "%%";
+        }
+        |]
+
+    addCassius [$cassius|
+        #mpc_progress_bar
+            width:         0px
+            border-bottom: 3px solid
+        |]
+
+    addHamlet [$hamlet| #mpc_progress_bar &nbsp; |]
 -- }}}
 
 -- Helpers {{{
