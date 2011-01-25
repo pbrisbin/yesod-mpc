@@ -30,16 +30,26 @@
 --
 -------------------------------------------------------------------------------
 module Yesod.Helpers.MPC 
-    ( MPC
-    , getMPC
-    , YesodMPC(..)
+    ( 
+    -- * Usage
+    -- $usage
+      YesodMPC(..)
     , MpdConfig(..)
+    -- * Subsite
+    -- $subsite
+    , MPC
+    , getMPC
     -- * Widgets
     -- $widgets
     , progressBarWidget
     , nowPlayingWidget
     , playListWidget
     , playerControlsWidget
+    , getCheckR
+    -- * Now Playing
+    -- $now_playing
+    , NowPlaying(..)
+    , nowPlaying
     ) where
 
 import Yesod
@@ -56,6 +66,82 @@ import qualified Network.MPD as MPD
 --debug :: (YesodMPC m) => String -> GHandler s m ()
 --debug = liftIO . hPutStrLn stderr
 
+-- Documentation {{{
+
+-- $usage
+--
+-- Instantiate your app with the YesodMPC class. All constructors are 
+-- optional.
+--
+-- There are varying levels difficulty in how you use this module:
+--
+-- * Define a subsite route to a nice out-of-the-box display and control
+--   page.
+--
+-- * Use the individual widgets anywhere in your site's existing pages.
+--   Write you're own javascript to call built-in update functions based
+--   on the xml returned from 'getCheckR'.
+--
+-- * Use the core 'NowPlaying' object to do whatever you want. Write
+--   your own update functions and your own javascript to call them.
+--
+
+-- $subsite
+-- 
+-- Ex:
+--
+-- > mkYesod "YourApp" [$parseRoutes| 
+-- > / RootR GET
+-- > /...
+-- > /mpc MpcR MPC getMPC 
+-- > |]
+--
+
+-- $widgets
+--
+-- Ex:
+--
+-- > getRootR :: Handler RepHtml
+-- > getRootR = defaultLayout $ do
+-- >     addJulius [$julius|
+-- >         // ajax code here
+-- >         |]
+-- >
+-- >     nowPlayingWidget
+-- >
+-- >     addHamlet [$hamlet| ...
+--
+-- Note: 
+--
+-- Each of these widgets contains javascript to update individual 
+-- tags. The main subsite uses AJAX to achieve screen updates by calling 
+-- the 'getCheckR' route which returns xml.
+--
+-- This route is also exported for this purpose.
+--
+
+-- $now_playing
+--
+-- Ex:
+--
+-- > getRootR :: Handler RepHtml
+-- > getRootR = defaultLayout $ do
+-- >     mnp <- nowPlaying
+-- >     case mnp of
+-- >         Nothing -> return ()
+-- >         Just np -> do
+-- >             addJulius [$julius|
+-- >                 // ajax code and update functions
+-- >                 |]
+-- >             addHamlet [$hamlet|
+-- >                 %p currently playing: $npTitle.np$
+-- >                 |]
+-- >
+-- >     addHamlet [$hamlet| ...
+--
+
+-- }}}
+
 -- | Represents now playing state, see 'nowPlaying' for how this is 
 --   constructed when needed.
 data NowPlaying = NowPlaying
@@ -68,7 +154,7 @@ data NowPlaying = NowPlaying
     , npId     :: Int    -- ^ playlist id
     , npCur    :: String -- ^ time elapsed, MM:SS
     , npTot    :: String -- ^ song length, MM:SS
-    , npProg   :: Integer-- ^ percentage elapsed for convenience
+    , npProg   :: Double -- ^ percentage elapsed for convenience
     }
 
 -- | Customize your connection to MPD
@@ -148,7 +234,9 @@ nowPlaying = do
         format = (\(q,r) -> pad q ++ ":" ++ pad r) . flip divMod 60
         pad    = (\s -> if length s == 1 then '0':s else s) . show
 
-        progress (d,i) = floor $ (*100) (d / realToFrac i)
+        -- convert stTime into percentage
+        progress :: (Double, MPD.Seconds) -> Double
+        progress (d,i) = (*100) (d / realToFrac i)
 
 -- Routes {{{
 -- | This is the main landing page. present now playing info and simple 
@@ -195,15 +283,15 @@ getStatusR = do
                         }
 
                         // update time
-                        if (typeof updateElapsedTime == 'function') {
+                        if (typeof updateCur == 'function') {
                             xCur = xmlHelper(xmlDoc, "cur");
-                            updateElapsedTime(xCur);
+                            updateCur(xCur);
                         }
 
                         // update progress bar
-                        if (typeof updateProgressBar == 'function') {
+                        if (typeof updateProgress == 'function') {
                             xProg = xmlHelper(xmlDoc, "progress");
-                            updateProgressBar(xProg);
+                            updateProgress(xProg);
                         }
                     }
                 }
@@ -292,7 +380,7 @@ actionRoute f = do
 
 -- | Return now playing information as xml for an AJAX request. Note 
 --   that this request is not authenticated even if you set an 
---   'authHelper'.
+--   'authHelper'
 getCheckR :: YesodMPC m => GHandler MPC m RepXml
 getCheckR = do
     result <- nowPlaying
@@ -320,45 +408,29 @@ getCheckR = do
             |]
 -- }}}
 
--- widgets {{{
---
--- $widgets
---
--- Some drop-in widgets that you can place on any page. The calling page 
--- is required to make any Ajax requests and call the update functions 
--- provided by the widgets.
---
-
--- | Show now playing info. You must call @updateState(_state);@ and 
---   @udpateElapsedTime(_time);@ from your Ajax handler.
+-- Widgets {{{
+-- | Show now playing info.
 nowPlayingWidget :: YesodMPC m => GWidget MPC m ()
 nowPlayingWidget = do
     addJulius [$julius|
-        if (typeof docHelper != 'function') {
-            // define this if it's not here already
-            function docHelper(_set, _id, _value) {
-                if (_set) {
-                    document.getElementById(_id).innerHTML = _value;
-                }
-                return document.getElementById(_id).innerHTML;
-            }
-
-
-        }
-
-        function updateState(_state) {
-            curState = docHelper(false, "mpc_state", "");
-            if (curState != _state) {
-                docHelper(true, "mpc_state", _state);
+        /* generic */
+        function updateTagById(_id, _newValue) {
+            curValue = document.getElementById(_id).innerHTML;
+            if (curValue != _newValue) {
+                document.getElementById(_id).innerHTML = _newValue;
             }
         }
 
-        function updateElapsedTime(_time) {
-            curTime = docHelper(false, "mpc_cur", "");
-            if (curTime != _time) {
-                docHelper(true, "mpc_cur", _time);
-            }
-        }
+        /* provide a function for each tag */
+        function updateState( _val) { updateTagById("mpc_state" , _val); }
+        function updatePos(   _val) { updateTagById("mpc_pos"   , _val); }
+        function updateId(    _val) { updateTagById("mpc_id"    , _val); }
+        function updateTitle( _val) { updateTagById("mpc_title" , _val); }
+        function updateArtist(_val) { updateTagById("mpc_artist", _val); }
+        function updateAlbum( _val) { updateTagById("mpc_album" , _val); }
+        function updateYear(  _val) { updateTagById("mpc_year"  , _val); }
+        function updateCur(   _val) { updateTagById("mpc_cur"   , _val); }
+        function updateTot(   _val) { updateTagById("mpc_tot"   , _val); }
         |]
 
     addCassius [$cassius|
@@ -505,28 +577,30 @@ playListWidget limit = do
                     then string "mpc_current"
                     else string "mpc_not_current"
 
--- | Show a \"progress bar\" by changing the width of a div element. You 
---   must call @updateProgressBar(_int);@ from your Ajax handler.
+-- | Show a \"progress bar\" by changing the width of a div element.
 progressBarWidget :: YesodMPC m => GWidget MPC m ()
 progressBarWidget = do
     addJulius [$julius|
-        function updateProgressBar(_int) {
-            document.getElementById("mpc_progress_bar").style.width = _int + "%%";
+        function updateProgress(_int) {
+            document.getElementById("mpc_progress_inner").style.width = _int + "%%";
         }
         |]
 
     addCassius [$cassius|
-        #mpc_progress_bar
+        #mpc_progress_inner
             width:         0px
-            border-bottom: 3px solid
+            border-bottom: 2px solid
         |]
 
-    addHamlet [$hamlet| #mpc_progress_bar &nbsp; |]
+    addHamlet [$hamlet| 
+        #mpc_progress_outer
+            #mpc_progress_inner &nbsp;
+        |]
 -- }}}
 
 -- Helpers {{{
 -- | Show playlist context with now playing centered but ensure we don't 
---   send invalide upper and lower bounds to the request
+--   send invalid upper and lower bounds to the request
 fixBounds :: Int -- ^ pos of currently playing track
           -> Int -- ^ length of current playlist
           -> Int -- ^ how many lines of context to show
