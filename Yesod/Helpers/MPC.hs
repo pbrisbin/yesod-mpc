@@ -329,10 +329,10 @@ getStatusR = do
 
         -- page content
         addHamlet [$hamlet| %h1 MPD |]
-        progressBarWidget
         nowPlayingWidget
         playListWidget 10
         playerControlsWidget
+        progressBarWidget
 
         addHamlet [$hamlet|
             %script window.onload = timedRefresh;
