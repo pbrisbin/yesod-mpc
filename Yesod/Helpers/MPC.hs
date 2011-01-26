@@ -43,8 +43,6 @@ module Yesod.Helpers.MPC
     -- $widgets
     , progressBarWidget
     , nowPlayingWidget
-    , playListWidget
-    , playerControlsWidget
     , getCheckR
     -- * Now Playing
     -- $now_playing
@@ -108,6 +106,7 @@ import qualified Network.MPD as MPD
 -- >         |]
 -- >
 -- >     nowPlayingWidget
+-- >     progressBarWidget
 -- >
 -- >     addHamlet [$hamlet| ...
 --
@@ -198,7 +197,7 @@ mkYesodSub "MPC"
 
 -- | Wrap MPD.withMPD or MPD.withMPDEx depending on the users mpd 
 --   configuration
-withMPD :: YesodMPC m => MPD.MPD a -> GHandler MPC m (MPD.Response a)
+withMPD :: YesodMPC m => MPD.MPD a -> GHandler s m (MPD.Response a)
 withMPD f = do
     config <- mpdConfig
     liftIO $ case config of
@@ -206,7 +205,7 @@ withMPD f = do
         Just c  -> MPD.withMPDEx (mpdHost c) (mpdPort c) (mpdPassword c) f
 
 -- | Return now playing info or nothing
-nowPlaying :: YesodMPC m => GHandler MPC m (Maybe NowPlaying)
+nowPlaying :: YesodMPC m => GHandler s m (Maybe NowPlaying)
 nowPlaying = do
     songResp  <- withMPD MPD.currentSong
     stateResp <- withMPD MPD.status
@@ -381,7 +380,7 @@ actionRoute f = do
 -- | Return now playing information as xml for an AJAX request. Note 
 --   that this request is not authenticated even if you set an 
 --   'authHelper'
-getCheckR :: YesodMPC m => GHandler MPC m RepXml
+getCheckR :: YesodMPC m => GHandler s m RepXml
 getCheckR = do
     result <- nowPlaying
     fmap RepXml . hamletToContent $ case result of
@@ -410,7 +409,7 @@ getCheckR = do
 
 -- Widgets {{{
 -- | Show now playing info.
-nowPlayingWidget :: YesodMPC m => GWidget MPC m ()
+nowPlayingWidget :: YesodMPC m => GWidget s m ()
 nowPlayingWidget = do
     addJulius [$julius|
         /* generic */
@@ -578,7 +577,7 @@ playListWidget limit = do
                     else string "mpc_not_current"
 
 -- | Show a \"progress bar\" by changing the width of a div element.
-progressBarWidget :: YesodMPC m => GWidget MPC m ()
+progressBarWidget :: YesodMPC m => GWidget s m ()
 progressBarWidget = do
     addJulius [$julius|
         function updateProgress(_int) {
@@ -617,7 +616,7 @@ fixBounds pos len limit = let
             | otherwise        = (l,u)
 
 -- | Return maybe the id of the currently playing song
-currentId :: YesodMPC m => GHandler MPC m (Maybe (Int,Int))
+currentId :: YesodMPC m => GHandler s m (Maybe (Int,Int))
 currentId = do
     result <- withMPD MPD.currentSong
     case result of
