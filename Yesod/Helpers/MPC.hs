@@ -43,6 +43,8 @@ module Yesod.Helpers.MPC
     -- $widgets
     , progressBarWidget
     , nowPlayingWidget
+    , playListWidget
+    , playerControlsWidget
     , getCheckR
     -- * Now Playing
     -- $now_playing
@@ -117,6 +119,9 @@ import qualified Network.MPD as MPD
 -- the 'getCheckR' route which returns xml.
 --
 -- This route is also exported for this purpose.
+--
+-- Widgets which offer controls require you to define a subsite route 
+-- and pass it as an argument.
 --
 
 -- $now_playing
@@ -329,8 +334,8 @@ getStatusR = do
         -- page content
         addHamlet [$hamlet| %h1 MPD |]
         nowPlayingWidget
-        playListWidget 10
-        playerControlsWidget
+        playListWidget toMaster 10
+        playerControlsWidget toMaster
         progressBarWidget
 
         addHamlet [$hamlet|
@@ -469,8 +474,10 @@ nowPlayingWidget = do
             |]
 
 -- | Prev, Play/Pause, Next
-playerControlsWidget :: YesodMPC m => GWidget MPC m ()
-playerControlsWidget = do
+playerControlsWidget :: YesodMPC m 
+                     => (MPCRoute -> Route m) -- ^ your subsite route
+                     -> GWidget s m ()
+playerControlsWidget mpcR = do
     addCassius [$cassius|
         .mpc_controls table
             margin-left:    auto
@@ -484,25 +491,25 @@ playerControlsWidget = do
             text-decoration: none
         |]
 
-    toMaster <- liftHandler getRouteToMaster
     addHamlet [$hamlet|
         .mpc_controls
             %table
                 %tr
                     %td
-                        %a!href=@toMaster.PrevR@  [ << ]
+                        %a!href=@mpcR.PrevR@  [ << ]
                     %td
-                        %a!href=@toMaster.PauseR@ [ || ]
+                        %a!href=@mpcR.PauseR@ [ || ]
                     %td
-                        %a!href=@toMaster.NextR@  [ >> ]
+                        %a!href=@mpcR.NextR@  [ >> ]
         |]
 
 -- | A formatted play list, limited, auto-centered/highlighted on now 
 --   playing, and with links to play and remove the entries
 playListWidget :: YesodMPC m
-                  => Int -- ^ limit display
-                  -> GWidget MPC m ()
-playListWidget limit = do
+                  => (MPCRoute -> Route m) -- ^ your subsite route
+                  -> Int                   -- ^ limit display
+                  -> GWidget s m ()
+playListWidget mpcR limit = do
     addCassius [$cassius|
         .mpc_playlist table
             margin-left:  auto
@@ -528,7 +535,6 @@ playListWidget limit = do
             text-decoration: none
         |]
 
-    toMaster  <- liftHandler getRouteToMaster
     (pos,cid) <- liftM (fromMaybe (0,0)) $ liftHandler currentId
     result    <- liftHandler . withMPD $ MPD.playlistInfo Nothing
 
@@ -567,9 +573,9 @@ playListWidget limit = do
                             %td $artist$
                             %td $title$
                             %td.mpc_playlist_button
-                                %a!href=@toMaster.PlayR.pid@ |>
+                                %a!href=@mpcR.PlayR.pid@ |>
                             %td.mpc_playlist_button
-                                %a!href=@toMaster.DelR.pid@  X
+                                %a!href=@mpcR.DelR.pid@  X
                         |]
 
                 clazz x = if x == cid
