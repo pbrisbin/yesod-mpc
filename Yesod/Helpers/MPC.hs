@@ -55,10 +55,9 @@ module Yesod.Helpers.MPC
 import Yesod
 
 import Control.Monad (liftM)
-import Data.Maybe (fromMaybe)
+import Data.Maybe    (fromMaybe)
 import Language.Haskell.TH.Syntax hiding (lift)
 
-import qualified Data.Map as M
 import qualified Network.MPD as MPD
 
 --import System.IO
@@ -225,8 +224,8 @@ nowPlaying = do
                     MPD.Playing -> "playing"
                     MPD.Paused  -> "paused"
                     MPD.Stopped -> "stopped"
-                , npPos    = fromMaybe 0 . fmap fst $ MPD.sgIndex song
-                , npId     = fromMaybe 0 . fmap snd $ MPD.sgIndex song
+                , npPos    = fromMaybe (-1) . fmap fst $ MPD.sgIndex song
+                , npId     = fromMaybe (-1) . fmap snd $ MPD.sgIndex song
                 , npCur    = format . round . fst $ MPD.stTime state
                 , npTot    = format .         snd $ MPD.stTime state
                 , npProg   = progress $ MPD.stTime state
@@ -535,9 +534,11 @@ playListWidget mpcR limit = do
             text-decoration: none
         |]
 
-    (pos,cid) <- liftM (fromMaybe (0,0)) $ liftHandler currentId
-    result    <- liftHandler . withMPD $ MPD.playlistInfo Nothing
+    mnp <- liftHandler nowPlaying
+    let pos = fromMaybe (-1) $ fmap npPos mnp
+    let cid = fromMaybe (-1) $ fmap npId  mnp
 
+    result <- liftHandler . withMPD $ MPD.playlistInfo Nothing
     let len = case result of
             Left _      -> 0
             Right songs -> length songs
@@ -621,17 +622,8 @@ fixBounds pos len limit = let
             | u > len          = fixBounds (pos - (u - len)) len limit
             | otherwise        = (l,u)
 
--- | Return maybe the id of the currently playing song
-currentId :: YesodMPC m => GHandler s m (Maybe (Int,Int))
-currentId = do
-    result <- withMPD MPD.currentSong
-    case result of
-        Left _            -> return Nothing
-        Right Nothing     -> return Nothing
-        Right (Just song) -> return $ MPD.sgIndex song
-
 -- | Get the first instance of the given tag in the the passed song, 
 --   return "N/A" if it's not found
 getTag :: MPD.Metadata -> MPD.Song -> String
-getTag tag = head . M.findWithDefault ["N/A"] tag . MPD.sgTags
+getTag tag = head . fromMaybe ["N/A"] . MPD.sgGet tag
 -- }}
