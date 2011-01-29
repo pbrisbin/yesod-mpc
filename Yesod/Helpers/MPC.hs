@@ -524,11 +524,6 @@ playListWidget mpcR limit = do
         tr.mpc_current
             font-weight: bold
 
-        td.mpc_playlist_button
-            text-align: center
-            font-size:  75%
-            width:      20px
-
         .mpc_playlist a:link, .mpc_playlist a:visited, .mpc_playlist a:hover
             outline:         none
             text-decoration: none
@@ -557,26 +552,25 @@ playListWidget mpcR limit = do
                     %tr
                         %th #
                         %th Artist
+                        %th Album
                         %th Title
-                        %th Play
-                        %th Remove
+
                     $forall songs song
                         ^formatSong.song^
             |]
             where
                 formatSong song = let
                     artist = getTag MPD.Artist song
+                    album  = getTag MPD.Album  song
                     title  = getTag MPD.Title  song
                     pid    = fromMaybe 0 . fmap snd $ MPD.sgIndex song
                     in [$hamlet| 
                         %tr.$clazz.pid$
-                            %td $string.show.pid$
+                            %td 
+                                %a!href=@mpcR.PlayR.pid@ $string.show.pid$
                             %td $artist$
+                            %td $album$
                             %td $title$
-                            %td.mpc_playlist_button
-                                %a!href=@mpcR.PlayR.pid@ |>
-                            %td.mpc_playlist_button
-                                %a!href=@mpcR.DelR.pid@  X
                         |]
 
                 clazz x = if x == cid
