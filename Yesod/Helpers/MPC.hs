@@ -503,7 +503,7 @@ playerControlsWidget mpcR = do
         |]
 
 -- | A formatted play list, limited, auto-centered/highlighted on now 
---   playing, and with links to play and remove the entries
+--   playing.
 playListWidget :: YesodMPC m
                   => (MPCRoute -> Route m) -- ^ your subsite route
                   -> Int                   -- ^ limit display
