@@ -185,6 +185,10 @@ class Yesod m => YesodMPC m where
     authHelper :: GHandler s m ()
     authHelper = return ()
 
+    -- | default is Nothing, no albumart functionality
+    albumArtHelper :: GHandler s m (Maybe String)
+    albumArtHelper = return Nothing
+
 mkYesodSub "MPC" 
     [ ClassP ''YesodMPC [ VarT $ mkName "master" ]
     ] 
@@ -415,6 +419,7 @@ getCheckR = do
 -- | Show now playing info.
 nowPlayingWidget :: YesodMPC m => GWidget s m ()
 nowPlayingWidget = do
+    mcover <- liftHandler albumArtHelper
     addJulius [$julius|
         /* generic */
         function updateTagById(_id, _newValue) {
@@ -434,9 +439,17 @@ nowPlayingWidget = do
         function updateYear(  _val) { updateTagById("mpc_year"  , _val); }
         function updateCur(   _val) { updateTagById("mpc_cur"   , _val); }
         function updateTot(   _val) { updateTagById("mpc_tot"   , _val); }
+
+        // todo: updateCover();
         |]
 
     addCassius [$cassius|
+        #mpc_cover
+            float:         left
+            height:        75px
+            widght:        75px
+            padding-right: 5px
+
         #mpc_title
             font-weight:  bold
             font-size:    200%
@@ -451,6 +464,9 @@ nowPlayingWidget = do
         Nothing -> addHamlet [$hamlet| %em N/A |]
         Just np -> addHamlet [$hamlet|
             .mpc_nowplaying
+                $maybe mcover cover
+                    %img#mpc_cover!src=$cover$
+
                 %p
                     %span#mpc_pos!style="display: none;" $show.npPos.np$
                     %span#mpc_id!style="display: none;"  $show.npId.np$
@@ -468,6 +484,7 @@ nowPlayingWidget = do
                         %span#mpc_cur    $npCur.np$
                         \ / 
                         %span#mpc_tot    $npTot.np$
+
                 %p
                     %span#mpc_title $npTitle.np$
             |]
@@ -495,11 +512,11 @@ playerControlsWidget mpcR = do
             %table
                 %tr
                     %td
-                        %a!href=@mpcR.PrevR@  [ << ]
+                        %a!href=@mpcR.PrevR@  [ &lt;&lt; ]
                     %td
                         %a!href=@mpcR.PauseR@ [ || ]
                     %td
-                        %a!href=@mpcR.NextR@  [ >> ]
+                        %a!href=@mpcR.NextR@  [ &gt;&gt; ]
         |]
 
 -- | A formatted play list, limited, auto-centered/highlighted on now 
