@@ -186,8 +186,8 @@ class Yesod m => YesodMPC m where
     authHelper = return ()
 
     -- | default is Nothing, no albumart functionality
-    albumArtHelper :: GHandler s m (Maybe String)
-    albumArtHelper = return Nothing
+    albumArtHelper :: NowPlaying -> GHandler s m (Maybe String)
+    albumArtHelper = return . const Nothing
 
 mkYesodSub "MPC" 
     [ ClassP ''YesodMPC [ VarT $ mkName "master" ]
@@ -419,7 +419,6 @@ getCheckR = do
 -- | Show now playing info.
 nowPlayingWidget :: YesodMPC m => GWidget s m ()
 nowPlayingWidget = do
-    mcover <- liftHandler albumArtHelper
     addJulius [$julius|
         /* generic */
         function updateTagById(_id, _newValue) {
@@ -462,32 +461,34 @@ nowPlayingWidget = do
     result <- liftHandler nowPlaying
     case result of
         Nothing -> addHamlet [$hamlet| %em N/A |]
-        Just np -> addHamlet [$hamlet|
-            .mpc_nowplaying
-                $maybe mcover cover
-                    %img#mpc_cover!src=$cover$
+        Just np -> do
+            mcover <- liftHandler $ albumArtHelper np
+            addHamlet [$hamlet|
+                .mpc_nowplaying
+                    $maybe mcover cover
+                        %img#mpc_cover!src=$cover$
 
-                %p
-                    %span#mpc_pos!style="display: none;" $show.npPos.np$
-                    %span#mpc_id!style="display: none;"  $show.npId.np$
+                    %p
+                        %span#mpc_pos!style="display: none;" $show.npPos.np$
+                        %span#mpc_id!style="display: none;"  $show.npId.np$
 
-                    %span#mpc_state  $npState.np$
-                    \ / 
-                    %span#mpc_artist $npArtist.np$
-                    \ - 
-                    %span#mpc_album  $npAlbum.np$
-                    \ (
-                    %span#mpc_year   $npYear.np$
-                    )
-
-                    %span.mpc_elapsed
-                        %span#mpc_cur    $npCur.np$
+                        %span#mpc_state  $npState.np$
                         \ / 
-                        %span#mpc_tot    $npTot.np$
+                        %span#mpc_artist $npArtist.np$
+                        \ - 
+                        %span#mpc_album  $npAlbum.np$
+                        \ (
+                        %span#mpc_year   $npYear.np$
+                        )
 
-                %p
-                    %span#mpc_title $npTitle.np$
-            |]
+                        %span.mpc_elapsed
+                            %span#mpc_cur    $npCur.np$
+                            \ / 
+                            %span#mpc_tot    $npTot.np$
+
+                    %p
+                        %span#mpc_title $npTitle.np$
+                |]
 
 -- | Prev, Play/Pause, Next
 playerControlsWidget :: YesodMPC m 
