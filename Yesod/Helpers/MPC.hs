@@ -38,6 +38,7 @@ module Yesod.Helpers.MPC
     -- * Subsite
     -- $subsite
     , MPC
+    , MPCRoute(..)
     , getMPC
     -- * Widgets
     -- $widgets
