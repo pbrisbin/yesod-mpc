@@ -255,8 +255,9 @@ getStatusR = do
     authHelper
     toMaster <- getRouteToMaster
     delay    <- liftM (*1000) refreshSpeed
+    title    <- return . maybe "" npTitle =<< nowPlaying
     defaultLayout $ do
-        setTitle $ string "MPD"
+        setTitle $ string $ "MPD" <> title
 
         -- ajax-powerd refresh {{{
         addJulius [$julius|
@@ -347,6 +348,9 @@ getStatusR = do
             %noscript
                 note: javascript is required for screen updates.
             |]
+    where
+        x <> "" = x
+        x <> y  = x ++ " - " ++ y
 
 -- | Previous
 getPrevR :: YesodMPC m => GHandler MPC m RepHtml
