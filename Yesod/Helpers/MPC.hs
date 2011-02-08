@@ -394,29 +394,38 @@ actionRoute f = do
 --   'authHelper'
 getCheckR :: YesodMPC m => GHandler s m RepXml
 getCheckR = do
-    result <- nowPlaying
-    fmap RepXml . hamletToContent $ case result of
-        Nothing -> [$xhamlet|
-            \<?xml version="1.0" encoding="utf-8"?>
-            %xml
-                %status ERR
-                %error  MPD threw an error
-            |]
-        Just np -> [$xhamlet|
-            \<?xml version="1.0" encoding="utf-8"?>
-            %xml
-                %status   OK
-                %state    $npState.np$
-                %title    $npTitle.np$
-                %artist   $npArtist.np$
-                %album    $npAlbum.np$
-                %year     $npYear.np$
-                %pos      $show.npPos.np$
-                %id       $show.npId.np$
-                %cur      $npCur.np$
-                %tot      $npTot.np$
-                %progress $show.npProg.np$
-            |]
+    xmlFromNowPlaying =<< nowPlaying
+
+    where
+        xmlFromNowPlaying :: YesodMPC m => Maybe NowPlaying -> GHandler s m RepXml
+        xmlFromNowPlaying Nothing = fmap RepXml $ hamletToContent 
+            [$xhamlet|
+                \<?xml version="1.0" encoding="utf-8"?>
+                %xml
+                    %status ERR
+                    %error  MPD threw an error
+                |]
+
+        xmlFromNowPlaying (Just np) = do
+            coverurl <- fmap (fromMaybe "") $ albumArtHelper np
+            fmap RepXml $ hamletToContent 
+                [$xhamlet|
+                    \<?xml version="1.0" encoding="utf-8"?>
+                    %xml
+                        %status   OK
+                        %state    $npState.np$
+                        %title    $npTitle.np$
+                        %artist   $npArtist.np$
+                        %album    $npAlbum.np$
+                        %year     $npYear.np$
+                        %pos      $show.npPos.np$
+                        %id       $show.npId.np$
+                        %cur      $npCur.np$
+                        %tot      $npTot.np$
+                        %progress $show.npProg.np$
+                        %coverurl $coverurl$
+                    |]
+
 -- }}}
 
 -- Widgets {{{
@@ -426,10 +435,8 @@ nowPlayingWidget = do
     addJulius [$julius|
         /* generic */
         function updateTagById(_id, _newValue) {
-            curValue = document.getElementById(_id).innerHTML;
-            if (curValue != _newValue) {
-                document.getElementById(_id).innerHTML = _newValue;
-            }
+            var e = document.getElementById(_id);
+            if (e.innerHTML != _newValue) { e.innerHTML = _newValue; }
         }
 
         /* provide a function for each tag */
@@ -443,7 +450,11 @@ nowPlayingWidget = do
         function updateCur(   _val) { updateTagById("mpc_cur"   , _val); }
         function updateTot(   _val) { updateTagById("mpc_tot"   , _val); }
 
-        // todo: updateCover();
+        /* update the cover image */
+        function updateCover( _val) {
+            var e = document.getElementById("mpc_cover");
+            if (e.src != _val) { e.src = _val; }
+        }
         |]
 
     addCassius [$cassius|
