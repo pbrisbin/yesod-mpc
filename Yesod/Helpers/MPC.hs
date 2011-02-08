@@ -55,8 +55,7 @@ module Yesod.Helpers.MPC
 
 import Yesod
 
-import Control.Monad (liftM)
-import Data.Maybe    (fromMaybe)
+import Data.Maybe (fromMaybe)
 import Language.Haskell.TH.Syntax hiding (lift)
 
 import qualified Network.MPD as MPD
@@ -254,9 +253,10 @@ getStatusR :: YesodMPC m => GHandler MPC m RepHtml
 getStatusR = do
     authHelper
     toMaster <- getRouteToMaster
-    delay    <- liftM (*1000) refreshSpeed
+    delay    <- fmap (*1000) refreshSpeed
     title    <- return . maybe "" npTitle =<< nowPlaying
     defaultLayout $ do
+        let lim = 10
         setTitle $ string $ "MPD" <> title
 
         -- ajax-powerd refresh {{{
@@ -337,16 +337,15 @@ getStatusR = do
         -- }}}
 
         -- page content
-        addHamlet [$hamlet| %h1 MPD |]
-        nowPlayingWidget
-        playListWidget toMaster 10
-        playerControlsWidget toMaster
-        progressBarWidget
+        [$hamlet| 
+            %h1 MPD
+            ^nowPlayingWidget^
+            ^(playListWidget.toMaster).lim^
+            ^playerControlsWidget.toMaster^
+            ^progressBarWidget^
 
-        addHamlet [$hamlet|
-            %script window.onload = timedRefresh;
-            %noscript
-                note: javascript is required for screen updates.
+            %script   window.onload = timedRefresh;
+            %noscript note: javascript is required for screen updates.
             |]
     where
         x <> "" = x
