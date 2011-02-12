@@ -160,11 +160,12 @@ data NowPlaying = NowPlaying
     , npArtist :: String
     , npAlbum  :: String
     , npYear   :: String
-    , npPos    :: Int    -- ^ position in playlist
-    , npId     :: Int    -- ^ playlist id
-    , npCur    :: String -- ^ time elapsed, MM:SS
-    , npTot    :: String -- ^ song length, MM:SS
-    , npProg   :: Double -- ^ percentage elapsed for convenience
+    , npPos    :: Int          -- ^ position in playlist
+    , npId     :: Int          -- ^ playlist id
+    , npCur    :: String       -- ^ time elapsed, MM:SS
+    , npTot    :: String       -- ^ song length, MM:SS
+    , npProg   :: Double       -- ^ percentage elapsed for convenience
+    , npCover  :: Maybe String -- ^ url to cover image if setup
     }
 
 -- | Customize your connection to MPD
@@ -192,8 +193,8 @@ class Yesod m => YesodMPC m where
     authHelper :: GHandler s m ()
     authHelper = return ()
 
-    -- | default is Nothing, no albumart functionality
-    albumArtHelper :: NowPlaying -> GHandler s m (Maybe String)
+    -- | (Artist,Album) -> Maybe Cover url: default is Nothing
+    albumArtHelper :: (String,String) -> GHandler s m (Maybe String)
     albumArtHelper = return . const Nothing
 
 mkYesodSub "MPC" 
@@ -223,11 +224,14 @@ nowPlaying = do
     songResp  <- withMPD MPD.currentSong
     stateResp <- withMPD MPD.status
     case (songResp,stateResp) of
-        (Right (Just song), Right state) -> return $
-            Just NowPlaying
+        (Right (Just song), Right state) -> do
+            let artist = getTag MPD.Artist song
+            let album  = getTag MPD.Album  song
+            coverurl <- albumArtHelper (artist,album)
+            return $ Just NowPlaying
                 { npTitle  = getTag MPD.Title song
-                , npArtist = getTag MPD.Artist song
-                , npAlbum  = getTag MPD.Album song
+                , npArtist = artist
+                , npAlbum  = album
                 , npYear   = getTag MPD.Date song
                 , npState  = case MPD.stState state of
                     MPD.Playing -> "playing"
@@ -238,6 +242,7 @@ nowPlaying = do
                 , npCur    = format . round . fst $ MPD.stTime state
                 , npTot    = format .         snd $ MPD.stTime state
                 , npProg   = progress $ MPD.stTime state
+                , npCover  = coverurl
                 } 
         -- todo: make this an Either and return the error(s)
         _ -> return Nothing
@@ -256,72 +261,67 @@ getStatusR = do
     authHelper
     toMaster <- getRouteToMaster
     delay    <- fmap (*1000) refreshSpeed
-    mnp      <- nowPlaying
-    (title,coverurl) <- case mnp of
-        Just np -> do
-            coverurl <- fmap (fromMaybe "") $ albumArtHelper np
-            return (npTitle np, coverurl)
-        Nothing -> return ("","")
-    defaultLayoutJson (do
-        let lim = 10
-        setTitle $ string $ "MPD" <> title
+    nowPlaying >>= \mnp ->
+        defaultLayoutJson (do
+            let lim = 10
+            setTitle $ string $ "MPD" <> (maybe "" npTitle mnp)
 
-        -- ajax-powerd refresh {{{
-        addJulius [$julius|
-            $(function() { getNowPlaying(); })
+            -- ajax-powerd refresh {{{
+            addJulius [$julius|
+                $(function() { getNowPlaying(); })
 
-            function getNowPlaying() {
-                var delay = %show.delay%;
+                function getNowPlaying() {
+                    var delay = %show.delay%;
 
-                if (delay != 0) {
-                    $.getJSON(window.location.href, {}, function(o) {
-                        if (o.status == "OK") {
+                    if (delay != 0) {
+                        $.getJSON(window.location.href, {}, function(o) {
+                            if (o.status == "OK") {
 
-                            / * track's changed, refresh page */
-                            if (document.getElementById("mpc_pos").innerHTML != o.pos ||
-                                document.getElementById("mpc_id").innerHTML  != o.id) {
-                                location.reload(true);
-                                return;
+                                / * track's changed, refresh page */
+                                if (document.getElementById("mpc_pos").innerHTML != o.pos ||
+                                    document.getElementById("mpc_id").innerHTML  != o.id) {
+                                    location.reload(true);
+                                    return;
+                                }
+
+                                if (typeof updateState    == 'function') updateState(o.stat);
+                                if (typeof updateCur      == 'function') updateCur(o.cur);
+                                if (typeof updateProgress == 'function') updateProgress(o.progress);
                             }
+                        });
 
-                            if (typeof updateState    == 'function') updateState(o.stat);
-                            if (typeof updateCur      == 'function') updateCur(o.cur);
-                            if (typeof updateProgress == 'function') updateProgress(o.progress);
-                        }
-                    });
-
-                    setTimeout("getNowPlaying();", delay);
+                        setTimeout("getNowPlaying();", delay);
+                    }
                 }
-            }
-            |]
-        -- }}}
+                |]
+            -- }}}
 
-        -- page content
-        [$hamlet| 
-            %h1 MPD
-            ^nowPlayingWidget^
-            ^(playListWidget.toMaster).lim^
-            ^playerControlsWidget.toMaster^
-            ^progressBarWidget^
-            |]) (json mnp coverurl)
+            -- page content
+            [$hamlet| 
+                %h1 MPD
+                ^nowPlayingWidget^
+                ^(playListWidget.toMaster).lim^
+                ^playerControlsWidget.toMaster^
+                ^progressBarWidget^
+                |]) (json mnp)
     where
         x <> "" = x
         x <> y  = x ++ " - " ++ y
 
-        json mnp url = case mnp of
+        json mnp = case mnp of
             Just np -> jsonMap
                 [ ("status"  , jsonScalar $ "OK"  )
-                , ("state"   , jsonScalar $ npState np      )
-                , ("title"   , jsonScalar $ npTitle np      )
-                , ("artist"  , jsonScalar $ npArtist np     )
-                , ("album"   , jsonScalar $ npAlbum np      )
-                , ("year"    , jsonScalar $ npYear np       )
-                , ("pos"     , jsonScalar . show $ npPos np )
-                , ("id"      , jsonScalar . show $ npId np  )
-                , ("cur"     , jsonScalar $ npCur np        )
-                , ("tot"     , jsonScalar $ npTot np        )
-                , ("progress", jsonScalar . show $ npProg np)
-                , ("coverurl", jsonScalar $ url             )
+                , ("state"   , jsonScalar $ npState np               )
+                , ("title"   , jsonScalar $ npTitle np               )
+                , ("artist"  , jsonScalar $ npArtist np              )
+                , ("album"   , jsonScalar $ npAlbum np               )
+                , ("year"    , jsonScalar $ npYear np                )
+                , ("pos"     , jsonScalar . show $ npPos np          )
+                , ("id"      , jsonScalar . show $ npId np           )
+                , ("cur"     , jsonScalar $ npCur np                 )
+                , ("tot"     , jsonScalar $ npTot np                 )
+                , ("progress", jsonScalar . show $ npProg np         )
+                , ("coverurl", jsonScalar . fromMaybe "" $ npCover np)
                 ]
                 
             _ -> jsonMap
@@ -416,35 +416,33 @@ nowPlayingWidget = do
 
     result <- liftHandler nowPlaying
     case result of
-        Nothing -> addHamlet [$hamlet| %em N/A |]
-        Just np -> do
-            mcover <- liftHandler $ albumArtHelper np
-            addHamlet [$hamlet|
-                .mpc_nowplaying
-                    $maybe mcover cover
-                        %img#mpc_cover!src=$cover$
+        Nothing -> [$hamlet| %em N/A |]
+        Just np -> [$hamlet|
+            .mpc_nowplaying
+                $maybe npCover.np cover
+                    %img#mpc_cover!src=$cover$
 
-                    %p
-                        %span#mpc_pos!style="display: none;" $show.npPos.np$
-                        %span#mpc_id!style="display: none;"  $show.npId.np$
+                %p
+                    %span#mpc_pos!style="display: none;" $show.npPos.np$
+                    %span#mpc_id!style="display: none;"  $show.npId.np$
 
-                        %span#mpc_state  $npState.np$
+                    %span#mpc_state  $npState.np$
+                    \ / 
+                    %span#mpc_artist $npArtist.np$
+                    \ - 
+                    %span#mpc_album  $npAlbum.np$
+                    \ (
+                    %span#mpc_year   $npYear.np$
+                    )
+
+                    %span.mpc_elapsed
+                        %span#mpc_cur    $npCur.np$
                         \ / 
-                        %span#mpc_artist $npArtist.np$
-                        \ - 
-                        %span#mpc_album  $npAlbum.np$
-                        \ (
-                        %span#mpc_year   $npYear.np$
-                        )
+                        %span#mpc_tot    $npTot.np$
 
-                        %span.mpc_elapsed
-                            %span#mpc_cur    $npCur.np$
-                            \ / 
-                            %span#mpc_tot    $npTot.np$
-
-                    %p
-                        %span#mpc_title $npTitle.np$
-                |]
+                %p
+                    %span#mpc_title $npTitle.np$
+            |]
 
 -- | Prev, Play/Pause, Next
 playerControlsWidget :: YesodMPC m 
