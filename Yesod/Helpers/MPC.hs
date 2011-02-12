@@ -28,6 +28,14 @@
 --
 -- seem to work for me.
 --
+-- The screen updates are accomplished via Ajax and jQuery. In order to 
+-- use this functionality add the following to the @head@ of 
+-- @defaultLayout@:
+--
+-- > %script!src="http://ajax.googleapis.com/ajax/libs/jquery/1.4.4/jquery.min.js"
+--
+-- or similar, before @^pageHead.pc^@.
+--
 -------------------------------------------------------------------------------
 module Yesod.Helpers.MPC 
     ( 
@@ -46,7 +54,6 @@ module Yesod.Helpers.MPC
     , nowPlayingWidget
     , playListWidget
     , playerControlsWidget
-    , getCheckR
     -- * Now Playing
     -- $now_playing
     , NowPlaying(..)
@@ -72,17 +79,19 @@ import qualified Network.MPD as MPD
 -- Instantiate your app with the YesodMPC class. All constructors are 
 -- optional.
 --
--- There are varying levels difficulty in how you use this module:
+-- Ensure you source a jquery.js in your @defaultLayout@. To allow 
+-- screen refreshes on the main page.
+--
+-- There are varying levels difficulty in how you use this module 
+-- otherwise:
 --
 -- * Define a subsite route to a nice out-of-the-box display and control
 --   page.
 --
 -- * Use the individual widgets anywhere in your site's existing pages.
---   Write you're own javascript to call built-in update functions based
---   on the xml returned from 'getCheckR'.
+--   Write you're own javascript to call built-in update functions.
 --
--- * Use the core 'NowPlaying' object to do whatever you want. Write
---   your own update functions and your own javascript to call them.
+-- * Use the core 'NowPlaying' object to do whatever you want.
 --
 
 -- $subsite
@@ -114,10 +123,8 @@ import qualified Network.MPD as MPD
 -- Note: 
 --
 -- Each of these widgets contains javascript to update individual 
--- tags. The main subsite uses AJAX to achieve screen updates by calling 
--- the 'getCheckR' route which returns xml.
---
--- This route is also exported for this purpose.
+-- tags. The main subsite uses AJAX to achieve screen updates by 
+-- requesting updated now playing info via JSON at its own url.
 --
 -- Widgets which offer controls require you to define a subsite route 
 -- and pass it as an argument.
@@ -199,8 +206,6 @@ mkYesodSub "MPC"
     /next        NextR   GET
     /play/#Int   PlayR   GET
     /delete/#Int DelR    GET
-
-    /statecheck.xml CheckR GET
     |]
 
 -- | Wrap MPD.withMPD or MPD.withMPDEx depending on the users mpd 
@@ -246,92 +251,47 @@ nowPlaying = do
         progress (d,i) = (*100) (d / realToFrac i)
 
 -- Routes {{{
--- | This is the main landing page. present now playing info and simple 
---   prev, pause, next controls. todo:s include playlist and library 
---   support, more advanced controls, maybe some album art
-getStatusR :: YesodMPC m => GHandler MPC m RepHtml
+getStatusR :: YesodMPC m => GHandler MPC m RepHtmlJson
 getStatusR = do
     authHelper
     toMaster <- getRouteToMaster
     delay    <- fmap (*1000) refreshSpeed
-    title    <- return . maybe "" npTitle =<< nowPlaying
-    defaultLayout $ do
+    mnp      <- nowPlaying
+    (title,coverurl) <- case mnp of
+        Just np -> do
+            coverurl <- fmap (fromMaybe "") $ albumArtHelper np
+            return (npTitle np, coverurl)
+        Nothing -> return ("","")
+    defaultLayoutJson (do
         let lim = 10
         setTitle $ string $ "MPD" <> title
 
         -- ajax-powerd refresh {{{
         addJulius [$julius|
-            var xmlhttp = new XMLHttpRequest();
+            $(function() { getNowPlaying(); })
 
-            // handle the callback
-            xmlhttp.onreadystatechange = function()
-            {
-                if (xmlhttp.readyState == 4 && xmlhttp.status == 200)
-                {
-                    xmlDoc  = xmlhttp.responseXML;
-                    xStatus = xmlHelper(xmlDoc, "status");
-                    
-                    if (xStatus == "OK")
-                    {
-                        xPos = xmlHelper(xmlDoc, "pos");
-                        xId  = xmlHelper(xmlDoc, "id");
-
-                        curPos = docHelper(false, "mpc_pos", "");
-                        curId  = docHelper(false, "mpc_id",  "");
-
-                        if (xPos != curPos || xId != curId) {
-                            // track changed, reload
-                            location.reload(true);
-                            return;
-                        }
-
-                        // update state
-                        if (typeof updateState == 'function') {
-                            xState = xmlHelper(xmlDoc, "state");
-                            updateState(xState);
-                        }
-
-                        // update time
-                        if (typeof updateCur == 'function') {
-                            xCur = xmlHelper(xmlDoc, "cur");
-                            updateCur(xCur);
-                        }
-
-                        // update progress bar
-                        if (typeof updateProgress == 'function') {
-                            xProg = xmlHelper(xmlDoc, "progress");
-                            updateProgress(xProg);
-                        }
-                    }
-                }
-            }
-
-            /* return the content of an xml tag */
-            function xmlHelper(_xmlDoc, _tag) {
-                return _xmlDoc.getElementsByTagName(_tag)[0].childNodes[0].nodeValue;
-            }
-
-            /* set and get a document tag's inner value */
-            function docHelper(_set, _id, _value) {
-                if (_set) {
-                    document.getElementById(_id).innerHTML = _value;
-                }
-                return document.getElementById(_id).innerHTML;
-            }
-
-            /* ask the server for updated now playing info */
             function getNowPlaying() {
-                xmlhttp.open("GET", "@toMaster.CheckR@", true);
-                xmlhttp.send();
-                timedRefresh();
-            }
-
-            /* setup the refresh if delay is non-zero */
-            function timedRefresh() {
                 var delay = %show.delay%;
 
-                if (delay != 0)
+                if (delay != 0) {
+                    $.getJSON(window.location.href, {}, function(o) {
+                        if (o.status == "OK") {
+
+                            / * track's changed, refresh page */
+                            if (document.getElementById("mpc_pos").innerHTML != o.pos ||
+                                document.getElementById("mpc_id").innerHTML  != o.id) {
+                                location.reload(true);
+                                return;
+                            }
+
+                            if (typeof updateState    == 'function') updateState(o.stat);
+                            if (typeof updateCur      == 'function') updateCur(o.cur);
+                            if (typeof updateProgress == 'function') updateProgress(o.progress);
+                        }
+                    });
+
                     setTimeout("getNowPlaying();", delay);
+                }
             }
             |]
         -- }}}
@@ -343,13 +303,31 @@ getStatusR = do
             ^(playListWidget.toMaster).lim^
             ^playerControlsWidget.toMaster^
             ^progressBarWidget^
-
-            %script   window.onload = timedRefresh;
-            %noscript note: javascript is required for screen updates.
-            |]
+            |]) (json mnp coverurl)
     where
         x <> "" = x
         x <> y  = x ++ " - " ++ y
+
+        json mnp url = case mnp of
+            Just np -> jsonMap
+                [ ("status"  , jsonScalar $ "OK"  )
+                , ("state"   , jsonScalar $ npState np      )
+                , ("title"   , jsonScalar $ npTitle np      )
+                , ("artist"  , jsonScalar $ npArtist np     )
+                , ("album"   , jsonScalar $ npAlbum np      )
+                , ("year"    , jsonScalar $ npYear np       )
+                , ("pos"     , jsonScalar . show $ npPos np )
+                , ("id"      , jsonScalar . show $ npId np  )
+                , ("cur"     , jsonScalar $ npCur np        )
+                , ("tot"     , jsonScalar $ npTot np        )
+                , ("progress", jsonScalar . show $ npProg np)
+                , ("coverurl", jsonScalar $ url             )
+                ]
+                
+            _ -> jsonMap
+                [ ("status", jsonScalar $ "ERR"               )
+                , ("error" , jsonScalar $ "MPD threw an error")
+                ]
 
 -- | Previous
 getPrevR :: YesodMPC m => GHandler MPC m RepHtml
@@ -388,43 +366,6 @@ actionRoute f = do
     toMaster <- getRouteToMaster
     _        <- withMPD f
     redirect RedirectTemporary $ toMaster StatusR
-
--- | Return now playing information as xml for an AJAX request. Note 
---   that this request is not authenticated even if you set an 
---   'authHelper'
-getCheckR :: YesodMPC m => GHandler s m RepXml
-getCheckR = do
-    xmlFromNowPlaying =<< nowPlaying
-
-    where
-        xmlFromNowPlaying :: YesodMPC m => Maybe NowPlaying -> GHandler s m RepXml
-        xmlFromNowPlaying Nothing = fmap RepXml $ hamletToContent 
-            [$xhamlet|
-                \<?xml version="1.0" encoding="utf-8"?>
-                %xml
-                    %status ERR
-                    %error  MPD threw an error
-                |]
-
-        xmlFromNowPlaying (Just np) = do
-            coverurl <- fmap (fromMaybe "") $ albumArtHelper np
-            fmap RepXml $ hamletToContent 
-                [$xhamlet|
-                    \<?xml version="1.0" encoding="utf-8"?>
-                    %xml
-                        %status   OK
-                        %state    $npState.np$
-                        %title    $npTitle.np$
-                        %artist   $npArtist.np$
-                        %album    $npAlbum.np$
-                        %year     $npYear.np$
-                        %pos      $show.npPos.np$
-                        %id       $show.npId.np$
-                        %cur      $npCur.np$
-                        %tot      $npTot.np$
-                        %progress $show.npProg.np$
-                        %coverurl $coverurl$
-                    |]
 
 -- }}}
 
@@ -653,4 +594,5 @@ fixBounds pos len limit = let
 --   return "N/A" if it's not found
 getTag :: MPD.Metadata -> MPD.Song -> String
 getTag tag = head . fromMaybe ["N/A"] . MPD.sgGet tag
+
 -- }}
