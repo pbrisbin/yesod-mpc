@@ -337,17 +337,15 @@ getPrevR = authHelper >> actionRoute MPD.previous
 getPauseR :: YesodMPC m => GHandler MPC m RepHtml
 getPauseR = authHelper >> getPlayPause >>= actionRoute
     where
-        -- | return the correct function give the current state
+        -- | return the correct function given the current state
         getPlayPause :: YesodMPC m => GHandler MPC m (MPD.MPD ())
-        getPlayPause = do
-            result <- withMPD MPD.status
-            case result of
-                Right status -> case MPD.stState status of
-                    MPD.Playing -> return $ MPD.pause True
-                    MPD.Stopped -> return $ MPD.play Nothing
-                    MPD.Paused  -> return $ MPD.play Nothing
-                -- meh, should probably handle this
-                Left _ -> return $ MPD.play Nothing
+        getPlayPause = withMPD MPD.status >>= either fromErr fromRes
+            where
+                fromErr _      = return $ MPD.play Nothing
+                fromRes status = return $ case MPD.stState status of
+                    MPD.Playing -> MPD.pause True
+                    MPD.Stopped -> MPD.play Nothing
+                    MPD.Paused  -> MPD.play Nothing
 
 -- | Next
 getNextR :: YesodMPC m => GHandler MPC m RepHtml
@@ -506,9 +504,7 @@ playListWidget mpcR limit = do
     let cid = fromMaybe (-1) $ fmap npId  mnp
 
     result <- liftHandler . withMPD $ MPD.playlistInfo Nothing
-    let len = case result of
-            Left _      -> 0
-            Right songs -> length songs
+    let len = either (const 0) length result
 
     -- find bounds to show len lines of context
     let (lower,upper) = fixBounds pos len limit
