@@ -284,7 +284,7 @@ getStatusR = do
                                     return;
                                 }
 
-                                if (typeof updateState    == 'function') updateState(o.stat);
+                                if (typeof updateState    == 'function') updateState(o.state);
                                 if (typeof updateCur      == 'function') updateCur(o.cur);
                                 if (typeof updateProgress == 'function') updateProgress(o.progress);
                             }
