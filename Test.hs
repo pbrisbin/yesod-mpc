@@ -16,22 +16,7 @@ data MpcTest = MpcTest
 -- | Have an mpc route
 mkYesod "MpcTest" [$parseRoutes| /mpc MpcR MPC getMPC |]
 
-instance Yesod MpcTest where 
-    approot _ = ""
-    defaultLayout widget = do
-        pc <- widgetToPageContent $ do
-            widget
-        hamletToRepHtml [$hamlet|
-            !!!
-            %html!lang="en"
-                %head
-                    %script!src="http://ajax.googleapis.com/ajax/libs/jquery/1.4.4/jquery.min.js"
-                    ^pageHead.pc^
-                    %title $pageTitle.pc$
-                %body
-                    ^pageBody.pc^
-            |]
-
+instance Yesod MpcTest where approot _ = ""
 
 -- | Make your site an instance of YesodMPC using all default values
 instance YesodMPC MpcTest
