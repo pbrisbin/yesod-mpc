@@ -28,14 +28,6 @@
 --
 -- seem to work for me.
 --
--- The screen updates are accomplished via Ajax and jQuery. In order to 
--- use this functionality add the following to the @head@ of 
--- @defaultLayout@:
---
--- > %script!src="http://ajax.googleapis.com/ajax/libs/jquery/1.4.4/jquery.min.js"
---
--- or similar, before @^pageHead.pc^@.
---
 -------------------------------------------------------------------------------
 module Yesod.Helpers.MPC 
     ( 
@@ -79,9 +71,6 @@ import qualified Network.MPD as MPD
 -- Instantiate your app with the YesodMPC class. All constructors are 
 -- optional.
 --
--- Ensure you source a jquery.js in your @defaultLayout@. To allow 
--- screen refreshes on the main page.
---
 -- There are varying levels difficulty in how you use this module 
 -- otherwise:
 --
@@ -89,7 +78,6 @@ import qualified Network.MPD as MPD
 --   page.
 --
 -- * Use the individual widgets anywhere in your site's existing pages.
---   Write you're own javascript to call built-in update functions.
 --
 -- * Use the core 'NowPlaying' object to do whatever you want.
 --
@@ -197,6 +185,10 @@ class Yesod m => YesodMPC m where
     albumArtHelper :: (String,String) -> GHandler s m (Maybe String)
     albumArtHelper = return . const Nothing
 
+    -- | In case you serve your own jQuery, default is hosted by google
+    jQueryUrl :: GHandler s m String
+    jQueryUrl = return "http://ajax.googleapis.com/ajax/libs/jquery/1.4.4/jquery.min.js"
+
 mkYesodSub "MPC" 
     [ ClassP ''YesodMPC [ VarT $ mkName "master" ]
     ] 
@@ -261,48 +253,52 @@ getStatusR = do
     authHelper
     toMaster <- getRouteToMaster
     delay    <- fmap (*1000) refreshSpeed
+    jQuery   <- jQueryUrl
     nowPlaying >>= \mnp ->
         defaultLayoutJson (do
             let lim = 10
-            setTitle $ string $ "MPD" <> (maybe "" npTitle mnp)
-
-            -- ajax-powerd refresh {{{
+            setTitle $ string $ "MPD" <> (maybe "" npTitle mnp) -- todo: provide updateTitle();
+            
+            -- ajax refresh {{{
             addJulius [$julius|
-                $(function() { getNowPlaying(); })
-
                 function getNowPlaying() {
                     var delay = %show.delay%;
 
                     if (delay != 0) {
                         $.getJSON(window.location.href, {}, function(o) {
                             if (o.status == "OK") {
-
-                                / * track's changed, refresh page */
+                                /* track's changed, refresh page */
                                 if (document.getElementById("mpc_pos").innerHTML != o.pos ||
                                     document.getElementById("mpc_id").innerHTML  != o.id) {
                                     location.reload(true);
                                     return;
-                                }
+                                };
 
-                                if (typeof updateState    == 'function') updateState(o.state);
-                                if (typeof updateCur      == 'function') updateCur(o.cur);
-                                if (typeof updateProgress == 'function') updateProgress(o.progress);
+                                if (typeof updateState    == 'function') { updateState(o.state);       }
+                                if (typeof updateCur      == 'function') { updateCur(o.cur);           }
+                                if (typeof updateProgress == 'function') { updateProgress(o.progress); }
                             }
                         });
 
                         setTimeout("getNowPlaying();", delay);
                     }
                 }
-                |]
+            |]
             -- }}}
 
-            -- page content
+            -- page content; java script is added end of body for faster 
+            -- page load
             [$hamlet| 
                 %h1 MPD
                 ^nowPlayingWidget^
                 ^(playListWidget.toMaster).lim^
                 ^playerControlsWidget.toMaster^
                 ^progressBarWidget^
+
+                %script!src=$jQuery$
+                %script $$(function() { getNowPlaying(); });
+                %noscript
+                    %em javascript is required for screenupdates
                 |]) (json mnp)
     where
         x <> "" = x
@@ -412,10 +408,9 @@ nowPlayingWidget = do
             float: right
         |]
 
-    result <- liftHandler nowPlaying
-    case result of
-        Nothing -> [$hamlet| %em N/A |]
-        Just np -> [$hamlet|
+    mnp <- liftHandler nowPlaying
+    [$hamlet|
+        $maybe mnp np
             .mpc_nowplaying
                 $maybe npCover.np cover
                     %img#mpc_cover!src=$cover$
@@ -440,7 +435,7 @@ nowPlayingWidget = do
 
                 %p
                     %span#mpc_title $npTitle.np$
-            |]
+        |]
 
 -- | Prev, Play/Pause, Next
 playerControlsWidget :: YesodMPC m 
