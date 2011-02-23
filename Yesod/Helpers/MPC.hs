@@ -396,8 +396,8 @@ nowPlayingWidget = do
         #mpc_cover
             float:         left
             height:        75px
-            widght:        75px
-            padding-right: 5px
+            width:         75px
+            margin-right:  5px
 
         #mpc_title
             font-weight:  bold
