@@ -262,14 +262,14 @@ getStatusR = do
             -- ajax refresh {{{
             addJulius [$julius|
                 function getNowPlaying() {
-                    var delay = %show.delay%;
+                    var delay = %show.delay%; // server-set variable
 
                     if (delay != 0) {
                         $.getJSON(window.location.href, {}, function(o) {
                             if (o.status == "OK") {
                                 /* track's changed, refresh page */
-                                if (document.getElementById("mpc_pos").innerHTML != o.pos ||
-                                    document.getElementById("mpc_id").innerHTML  != o.id) {
+                                if ($("#mpc_pos").html() != o.pos ||
+                                    $("#mpc_id").html()  != o.id) {
                                     location.reload(true);
                                     return;
                                 };
@@ -370,8 +370,8 @@ nowPlayingWidget = do
     addJulius [$julius|
         /* generic */
         function updateTagById(_id, _newValue) {
-            var e = document.getElementById(_id);
-            if (e.innerHTML != _newValue) { e.innerHTML = _newValue; }
+            var e = $("#" + _id);
+            if (e && e.html() != _newValue) { e.html(_newValue); }
         }
 
         /* provide a function for each tag */
@@ -387,8 +387,8 @@ nowPlayingWidget = do
 
         /* update the cover image */
         function updateCover( _val) {
-            var e = document.getElementById("mpc_cover");
-            if (e.src != _val) { e.src = _val; }
+            var e = $("#mpc_cover");
+            if (e && e.attr("src") != _val) { e.attr("src", _val); }
         }
         |]
 
@@ -545,7 +545,8 @@ progressBarWidget :: YesodMPC m => GWidget s m ()
 progressBarWidget = do
     addJulius [$julius|
         function updateProgress(_int) {
-            document.getElementById("mpc_progress_inner").style.width = _int + "%%";
+            var e = $("#mpc_progress_inner");
+            if (e) { e.css( { width: _int + "%%" } ); }
         }
         |]
 
