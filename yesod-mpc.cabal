@@ -15,7 +15,7 @@ library
   exposed-modules: Yesod.Helpers.MPC
   
   -- Packages needed in order to build this package.
-  build-depends: base, yesod, libmpd, containers, template-haskell, hamlet
+  build-depends: base, yesod, libmpd, containers, template-haskell, hamlet, blaze-html
 
   ghc-options: -Wall
   
