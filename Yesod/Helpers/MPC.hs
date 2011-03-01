@@ -16,129 +16,33 @@
 --
 -- A Yesod subsite allowing in-browser controls for MPD.
 --
--- Note:
---
--- Since each page load and redirect makes a new connection to MPD (and 
--- I've yet to figure out to prevent this), I recommend you adjust your 
--- settings in @\/etc\/mpd.conf@ to prevent \"MPD Connection timeout\" 
--- errors from appearing on the page during rapid next events.
---
--- > connection_timeout	"15" # was 60
--- > max_connections	"30" # was 10
---
--- seem to work for me.
---
 -------------------------------------------------------------------------------
 module Yesod.Helpers.MPC 
     ( 
     -- * Usage
-    -- $usage
       YesodMPC(..)
     , MpdConfig(..)
     -- * Subsite
-    -- $subsite
     , MPC
     , MPCRoute(..)
     , getMPC
     -- * Widgets
-    -- $widgets
     , progressBarWidget
     , nowPlayingWidget
     , playListWidget
     , playerControlsWidget
     -- * Now Playing
-    -- $now_playing
     , NowPlaying(..)
     , nowPlaying
     ) where
 
 import Yesod
+import Text.Blaze (toHtml)
 
 import Data.Maybe (fromMaybe)
 import Language.Haskell.TH.Syntax hiding (lift)
 
 import qualified Network.MPD as MPD
-
---import System.IO
---
---debug :: (YesodMPC m) => String -> GHandler s m ()
---debug = liftIO . hPutStrLn stderr
-
--- Documentation {{{
-
--- $usage
---
--- Instantiate your app with the YesodMPC class. All constructors are 
--- optional.
---
--- There are varying levels difficulty in how you use this module 
--- otherwise:
---
--- * Define a subsite route to a nice out-of-the-box display and control
---   page.
---
--- * Use the individual widgets anywhere in your site's existing pages.
---
--- * Use the core 'NowPlaying' object to do whatever you want.
---
-
--- $subsite
--- 
--- Ex:
---
--- > mkYesod "YourApp" [$parseRoutes| 
--- > / RootR GET
--- > /...
--- > /mpc MpcR MPC getMPC 
--- > |]
---
-
--- $widgets
---
--- Ex:
---
--- > getRootR :: Handler RepHtml
--- > getRootR = defaultLayout $ do
--- >     addJulius [$julius|
--- >         // ajax code here
--- >         |]
--- >
--- >     nowPlayingWidget
--- >     progressBarWidget
--- >
--- >     addHamlet [$hamlet| ...
---
--- Note: 
---
--- Each of these widgets contains javascript to update individual 
--- tags. The main subsite uses AJAX to achieve screen updates by 
--- requesting updated now playing info via JSON at its own url.
---
--- Widgets which offer controls require you to define a subsite route 
--- and pass it as an argument.
---
-
--- $now_playing
---
--- Ex:
---
--- > getRootR :: Handler RepHtml
--- > getRootR = defaultLayout $ do
--- >     mnp <- nowPlaying
--- >     case mnp of
--- >         Nothing -> return ()
--- >         Just np -> do
--- >             addJulius [$julius|
--- >                 // ajax code and update functions
--- >                 |]
--- >             addHamlet [$hamlet|
--- >                 %p currently playing: $npTitle.np$
--- >                 |]
--- >
--- >     addHamlet [$hamlet| ...
---
-
--- }}}
 
 -- | Represents now playing state, see 'nowPlaying' for how this is 
 --   constructed when needed.
@@ -257,12 +161,12 @@ getStatusR = do
     nowPlaying >>= \mnp ->
         defaultLayoutJson (do
             let lim = 10
-            setTitle $ string $ "MPD" <> (maybe "" npTitle mnp) -- todo: provide updateTitle();
+            setTitle $ toHtml $ "MPD" <> (maybe "" npTitle mnp) -- todo: provide updateTitle();
             
             -- ajax refresh {{{
             addJulius [$julius|
                 function getNowPlaying() {
-                    var delay = %show.delay%; // server-set variable
+                    var delay = #{show delay}; // server-set variable
 
                     if (delay != 0) {
                         $.getJSON(window.location.href, {}, function(o) {
@@ -288,17 +192,17 @@ getStatusR = do
 
             -- page content; java script is added end of body for faster 
             -- page load
-            [$hamlet| 
-                %h1 MPD
-                ^nowPlayingWidget^
-                ^(playListWidget.toMaster).lim^
-                ^playerControlsWidget.toMaster^
-                ^progressBarWidget^
+            [$hamlet|
+                <h1>MPD
+                ^{nowPlayingWidget}
+                ^{playListWidget toMaster lim}
+                ^{playerControlsWidget toMaster}
+                ^{progressBarWidget}
 
-                %script!src=$jQuery$
-                %script $$(function() { getNowPlaying(); });
-                %noscript
-                    %em javascript is required for screenupdates
+                <script src="#{jQuery}">
+                <script>$(function() { getNowPlaying(); });
+                <noscript>
+                    <em>javascript is required for screenupdates
                 |]) (json mnp)
     where
         x <> "" = x
@@ -394,47 +298,45 @@ nowPlayingWidget = do
 
     addCassius [$cassius|
         #mpc_cover
-            float:         left
-            height:        75px
-            width:         75px
-            margin-right:  5px
-
+            float: left
+            height: 75px
+            width: 75px
+            margin-right: 5px
         #mpc_title
-            font-weight:  bold
-            font-size:    200%
+            font-weight: bold
+            font-size: 200%
             padding-left: 10px
-
         .mpc_elapsed
             float: right
         |]
 
-    mnp <- liftHandler nowPlaying
+    mnp <- lift nowPlaying
     [$hamlet|
-        $maybe mnp np
-            .mpc_nowplaying
-                $maybe npCover.np cover
-                    %img#mpc_cover!src=$cover$
+        $maybe np <- mnp
+            <div .mpc_nowplaying>
+                $maybe cover <- npCover np
+                    <img id="mpc_cover" src="#{cover}">
 
-                %p
-                    %span#mpc_pos!style="display: none;" $show.npPos.np$
-                    %span#mpc_id!style="display: none;"  $show.npId.np$
+                <p>
+                    <span id="mpc_pos" style="display: none;">#{show (npPos np)}
+                    <span id="mpc_id" style="display: none;">#{show (npId np)}
 
-                    %span#mpc_state  $npState.np$
+                    <span id="mpc_state">#{npState np}
                     \ / 
-                    %span#mpc_artist $npArtist.np$
+                    <span id="mpc_artist">#{npArtist np}
                     \ - 
-                    %span#mpc_album  $npAlbum.np$
+                    <span id="mpc_album">#{npAlbum np}
                     \ (
-                    %span#mpc_year   $npYear.np$
-                    )
+                    <span id="mpc_year">#{npYear np}
+                    \)
 
-                    %span.mpc_elapsed
-                        %span#mpc_cur    $npCur.np$
+                    <span .mpc_elapsed>
+                        <span id="mpc_cur">#{npCur np}
                         \ / 
-                        %span#mpc_tot    $npTot.np$
+                        <span id="mpc_tot">#{npTot np}
 
-                %p
-                    %span#mpc_title $npTitle.np$
+                <p>
+                    <span id="mpc_title">#{npTitle np}
         |]
 
 -- | Prev, Play/Pause, Next
@@ -444,27 +346,26 @@ playerControlsWidget :: YesodMPC m
 playerControlsWidget mpcR = do
     addCassius [$cassius|
         .mpc_controls table
-            margin-left:    auto
-            margin-right:   auto
-            padding:        5px
-            padding-top:    20px
+            margin-left: auto
+            margin-right: auto
+            padding: 5px
+            padding-top: 20px
             padding-bottom: 20px
-
         .mpc_controls a:link, .mpc_controls a:visited, .mpc_controls a:hover
-            outline:         none
+            outline: none
             text-decoration: none
         |]
 
     addHamlet [$hamlet|
-        .mpc_controls
-            %table
-                %tr
-                    %td
-                        %a!href=@mpcR.PrevR@  [ &lt;&lt; ]
-                    %td
-                        %a!href=@mpcR.PauseR@ [ || ]
-                    %td
-                        %a!href=@mpcR.NextR@  [ &gt;&gt; ]
+        <div .mpc_controls>
+            <table>
+                <tr>
+                    <td>
+                        <a href="@{mpcR PrevR}">[ &lt;&lt; ]
+                    <td>
+                        <a href="@{mpcR PauseR}">[ || ]
+                    <td>
+                        <a href="@{mpcR NextR}">[ &gt;&gt; ]
         |]
 
 -- | A formatted play list, limited, auto-centered/highlighted on now 
@@ -476,50 +377,47 @@ playListWidget :: YesodMPC m
 playListWidget mpcR limit = do
     addCassius [$cassius|
         .mpc_playlist table
-            margin-left:  auto
+            margin-left: auto
             margin-right: auto
-
         .mpc_playlist th
             border-bottom: solid 1px
-
         .mpc_playlist td
-            padding-left:  5px
+            padding-left: 5px
             padding-right: 5px
-
         tr.mpc_current
             font-weight: bold
-
         .mpc_playlist a:link, .mpc_playlist a:visited, .mpc_playlist a:hover
-            outline:         none
+            outline: none
             text-decoration: none
         |]
 
-    mnp <- liftHandler nowPlaying
+    mnp <- lift nowPlaying
     let pos = fromMaybe (-1) $ fmap npPos mnp
     let cid = fromMaybe (-1) $ fmap npId  mnp
 
-    result <- liftHandler . withMPD $ MPD.playlistInfo Nothing
+    result <- lift . withMPD $ MPD.playlistInfo Nothing
     let len = either (const 0) length result
 
     -- find bounds to show len lines of context
     let (lower,upper) = fixBounds pos len limit
 
     -- get the limited, auto-centered playlist records
-    result' <- liftHandler . withMPD $ MPD.playlistInfo (Just (lower, upper))
+    result' <- lift . withMPD $ MPD.playlistInfo (Just (lower, upper))
 
     case result' of
-        Left err    -> addHamlet [$hamlet| %em $string.show.err$ |]
+        Left err    -> addHamlet [$hamlet| <em>#{toHtml (show err)} |]
         Right songs -> addHamlet [$hamlet|
-            .mpc_playlist
-                %table
-                    %tr
-                        %th #
-                        %th Artist
-                        %th Album
-                        %th Title
+            <div .mpc_playlist>
+                <table>
+                    <tr>
+                        <th>#
+                        <th>Artist
+                        <th>Album
+                        <th>Title
 
-                    $forall songs song
-                        ^formatSong.song^
+                    $forall song <- songs
+                        ^{formatSong song}
+
             |]
             where
                 formatSong song = let
@@ -527,18 +425,18 @@ playListWidget mpcR limit = do
                     album  = getTag MPD.Album  song
                     title  = getTag MPD.Title  song
                     pid    = fromMaybe 0 . fmap snd $ MPD.sgIndex song
-                    in [$hamlet| 
-                        %tr.$clazz.pid$
-                            %td 
-                                %a!href=@mpcR.PlayR.pid@ $string.show.pid$
-                            %td $artist$
-                            %td $album$
-                            %td $title$
+                    in [$hamlet|
+                        <tr .#{clazz pid}>
+                            <td>
+                                <a href="@{mpcR (PlayR pid)}">#{toHtml (show pid)}
+                            <td>#{artist}
+                            <td>#{album}
+                            <td>#{title}
                         |]
 
                 clazz x = if x == cid
-                    then string "mpc_current"
-                    else string "mpc_not_current"
+                    then toHtml "mpc_current"
+                    else toHtml "mpc_not_current"
 
 -- | Show a \"progress bar\" by changing the width of a div element.
 progressBarWidget :: YesodMPC m => GWidget s m ()
@@ -546,19 +444,19 @@ progressBarWidget = do
     addJulius [$julius|
         function updateProgress(_int) {
             var e = $("#mpc_progress_inner");
-            if (e) { e.css( { width: _int + "%%" } ); }
+            if (e) { e.css( { width: _int + "%" } ); }
         }
         |]
 
     addCassius [$cassius|
         #mpc_progress_inner
-            width:         0px
+            width: 0px
             border-bottom: 2px solid
         |]
 
-    addHamlet [$hamlet| 
-        #mpc_progress_outer
-            #mpc_progress_inner &nbsp;
+    addHamlet [$hamlet|
+        <div id="mpc_progress_outer">
+            <div id="mpc_progress_inner">&nbsp;
         |]
 -- }}}
 
