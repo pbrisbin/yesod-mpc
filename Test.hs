@@ -1,5 +1,6 @@
-{-# LANGUAGE QuasiQuotes  #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE QuasiQuotes           #-}
+{-# LANGUAGE TypeFamilies          #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 --
 -- pbrisbin 2010
 --
@@ -9,7 +10,7 @@ module Test where
 
 import Yesod
 import Yesod.Helpers.MPC
-import Network.Wai.Handler.SimpleServer (run)
+import Network.Wai.Handler.Warp (run)
 
 data MpcTest = MpcTest
 
@@ -22,5 +23,4 @@ instance Yesod MpcTest where approot _ = ""
 instance YesodMPC MpcTest
 
 main :: IO ()
---main = putStrLn "Loaded" >> toWaiApp MpcTest >>= run 3000
-main = putStrLn "Loaded" >> toWaiApp MpcTest >>= run 8080
+main = putStrLn "Loaded" >> toWaiApp MpcTest >>= run 3000
