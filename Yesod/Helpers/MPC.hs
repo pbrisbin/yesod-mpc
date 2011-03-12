@@ -410,7 +410,7 @@ playListWidget mpcR limit = do
             <div .mpc_playlist>
                 <table>
                     <tr>
-                        <th>#
+                        <th>No
                         <th>Artist
                         <th>Album
                         <th>Title
