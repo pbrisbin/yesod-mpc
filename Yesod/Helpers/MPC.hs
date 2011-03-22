@@ -26,14 +26,13 @@ module Yesod.Helpers.MPC
     , MPC
     , MPCRoute(..)
     , getMPC
-    -- * Widgets
-    , progressBarWidget
-    , nowPlayingWidget
-    , playListWidget
-    , playerControlsWidget
-    -- * Now Playing
+    -- * MPD interface
+    , withMPD
     , NowPlaying(..)
     , nowPlaying
+    , PlayListItem(..)
+    , PlayList
+    , playList
     ) where
 
 import Yesod
@@ -59,6 +58,16 @@ data NowPlaying = NowPlaying
     , npProg   :: Double       -- ^ percentage elapsed for convenience
     , npCover  :: Maybe String -- ^ url to cover image if setup
     }
+
+data PlayListItem = PlayListItem
+    { plNo      :: Int
+    , plArtist  :: String
+    , plAlbum   :: String
+    , plTitle   :: String
+    , plPlaying :: Bool
+    }
+
+type PlayList = [PlayListItem]
 
 -- | Customize your connection to MPD
 data MpdConfig = MpdConfig
@@ -91,19 +100,18 @@ class Yesod m => YesodMPC m where
 
     -- | In case you serve your own jQuery, default is hosted by google
     jQueryUrl :: GHandler s m String
-    jQueryUrl = return "http://ajax.googleapis.com/ajax/libs/jquery/1.4.4/jquery.min.js"
+    jQueryUrl = return "http://ajax.googleapis.com/ajax/libs/jquery/1.5/jquery.min.js"
 
 mkYesodSub "MPC" 
-    [ ClassP ''YesodMPC [ VarT $ mkName "master" ]
-    ] 
+    [ ClassP ''YesodMPC [ VarT $ mkName "master" ] ] 
     [$parseRoutes|
-    /            StatusR GET
-    /prev        PrevR   GET
-    /pause       PauseR  GET
-    /next        NextR   GET
-    /play/#Int   PlayR   GET
-    /delete/#Int DelR    GET
-    |]
+        /            StatusR GET
+        /prev        PrevR   GET
+        /pause       PauseR  GET
+        /next        NextR   GET
+        /play/#Int   PlayR   GET
+        /delete/#Int DelR    GET
+        |]
 
 -- | Wrap MPD.withMPD or MPD.withMPDEx depending on the users mpd 
 --   configuration
@@ -140,8 +148,10 @@ nowPlaying = do
                 , npProg   = progress $ MPD.stTime state
                 , npCover  = coverurl
                 } 
+
         -- todo: make this an Either and return the error(s)
         _ -> return Nothing
+
     where
         -- convert seconds to MM:SS
         format = (\(q,r) -> pad q ++ ":" ++ pad r) . flip divMod 60
@@ -151,19 +161,47 @@ nowPlaying = do
         progress :: (Double, MPD.Seconds) -> Double
         progress (d,i) = (*100) (d / realToFrac i)
 
--- Routes {{{
+-- | Return the current playlist context or the empty list
+playList :: YesodMPC m => NowPlaying -> GHandler s m (PlayList)
+playList np = do
+    -- determine overall playlist length
+    len <- return . either (const 0) length =<< withMPD (MPD.playlistInfo Nothing)
+    let bounds = Just $ fixBounds (npPos np) len 10
+
+    result' <- withMPD $ MPD.playlistInfo bounds
+    case result' of
+        Left _      -> return []
+        Right songs -> return $ map (itemFromSong $ npId np) songs
+
+    where
+        itemFromSong :: Int -> MPD.Song -> PlayListItem
+        itemFromSong cid song = PlayListItem
+            { plArtist  = getTag MPD.Artist song
+            , plAlbum   = getTag MPD.Album  song
+            , plTitle   = getTag MPD.Title  song
+            , plNo      = fromMaybe 0 . fmap snd $ MPD.sgIndex song
+            , plPlaying = cid == (fromMaybe (-1) . fmap snd $ MPD.sgIndex song)
+            }
+
+-- | Main page
 getStatusR :: YesodMPC m => GHandler MPC m RepHtmlJson
 getStatusR = do
     authHelper
-    toMaster <- getRouteToMaster
-    delay    <- fmap (*1000) refreshSpeed
-    jQuery   <- jQueryUrl
-    nowPlaying >>= \mnp ->
-        defaultLayoutJson (do
-            let lim = 10
-            setTitle $ toHtml $ "MPD" <> (maybe "" npTitle mnp) -- todo: provide updateTitle();
+    mnp <- nowPlaying
+    mpl <- playList =<? mnp
+
+    -- reply with main html view or json updates
+    defaultLayoutJson (htmlRep mnp mpl) (jsonRep mnp mpl)
+        
+    where
+        htmlRep (Just np) (Just pl) = do
+            toMaster <- lift $ getRouteToMaster
+            delay    <- lift $ fmap (*1000) refreshSpeed
+            jQuery   <- lift $ jQueryUrl
+           
+            setTitle $ toHtml ("MPD - " ++ npTitle np)
             
-            -- ajax refresh {{{
+            -- javascript {{{
             addJulius [$julius|
                 function getNowPlaying() {
                     var delay = #{show delay}; // server-set variable
@@ -171,16 +209,32 @@ getStatusR = do
                     if (delay != 0) {
                         $.getJSON(window.location.href, {}, function(o) {
                             if (o.status == "OK") {
-                                /* track's changed, refresh page */
-                                if ($("#mpc_pos").html() != o.pos ||
-                                    $("#mpc_id").html()  != o.id) {
-                                    location.reload(true);
-                                    return;
-                                };
+                                if (o.pos == $("#mpc_pos").text() && o.id  == $("#mpc_id").text()) {
+                                    // same track only update a few indicators
+                                    if (o.state != $("#mpc_state").text()) $("#mpc_state").text(o.state);
+                                    if (o.tot   != $("#mpc_tot").text())   $("#mpc_tot").text(o.tot);
+                                    if (o.cur   != $("#mpc_cur").text())   $("#mpc_cur").text(o.cur);
 
-                                if (typeof updateState    == 'function') { updateState(o.state);       }
-                                if (typeof updateCur      == 'function') { updateCur(o.cur);           }
-                                if (typeof updateProgress == 'function') { updateProgress(o.progress); }
+                                    // update progress
+                                    $("#mpc_progress_inner").css( { width: o.progress + "%" } );
+                                }
+                                else {
+                                    // new track, update everything
+                                    if (o.state  != $("#mpc_state").text())  $("#mpc_state").text(o.state);
+                                    if (o.tot    != $("#mpc_tot").text())    $("#mpc_tot").text(o.tot);
+                                    if (o.cur    != $("#mpc_cur").text())    $("#mpc_cur").text(o.cur);
+                                    if (o.artist != $("#mpc_artist").text()) $("#mpc_artist").text(o.artist);
+                                    if (o.album  != $("#mpc_album").text())  $("#mpc_album").text(o.album);
+                                    if (o.year   != $("#mpc_year").text())   $("#mpc_year").text(o.year);
+
+                                    if (o.title != $("#mpc_title").text()) {
+                                        $("#mpc_title").text(o.title);
+                                        document.title = "MPD - " + o.title;
+                                    }
+
+                                    // update cover image
+                                    if (o.cover != $("#mpc_cover").attr("src")) $("#mpc_cover").attr("src", o.cover);
+                                }
                             }
                         });
 
@@ -189,46 +243,144 @@ getStatusR = do
                 }
             |]
             -- }}}
+            
+            -- css {{{
+            addCassius [$cassius|
+                #mpc_cover
+                    float:        left
+                    height:       72px
+                    width:        72px
+                    margin-right: 5px
+                #mpc_title
+                    font-weight:  bold
+                    font-size:    200%
+                    padding-left: 10px
+                .mpc_elapsed
+                    float: right
+                .mpc_playlist table
+                    margin-left:  auto
+                    margin-right: auto
+                .mpc_playlist th
+                    border-bottom: solid 1px
+                .mpc_playlist td
+                    padding: 2px 5px;
+                tr.mpc_current
+                    font-weight: bold
+                .mpc_playlist a:link, .mpc_playlist a:visited, .mpc_playlist a:hover
+                    outline:         none
+                    text-decoration: none
+                .mpc_controls table
+                    margin:  0px auto;
+                    padding: 5px 20px;
+                .mpc_controls a:link, .mpc_controls a:visited, .mpc_controls a:hover
+                    outline:         none
+                    text-decoration: none
+                #mpc_progress_inner
+                    width:         0px
+                    border-bottom: 3px solid
+                |]
+            -- }}}
 
-            -- page content; java script is added end of body for faster 
-            -- page load
+            -- html {{{
             [$hamlet|
                 <h1>MPD
-                ^{nowPlayingWidget}
-                ^{playListWidget toMaster lim}
-                ^{playerControlsWidget toMaster}
-                ^{progressBarWidget}
+
+                \<!-- now playing {{{ -->
+                <div .mpc_nowplaying>
+                    $maybe cover <- npCover np
+                        <img #mpc_cover src="#{cover}">
+
+                    <p>
+                        <span #mpc_pos style="display: none;">#{show $ npPos np}
+                        <span #mpc_id style="display: none;">#{show $ npId np}
+
+                        <span #mpc_state>#{npState np}
+                        <span #mpc_sep> / 
+                        <span #mpc_artist>#{npArtist np}
+                        <span #mpc_sep> - 
+                        <span #mpc_album>#{npAlbum np}
+                        <span #mpc_paren> (
+                        <span #mpc_year>#{npYear np}
+                        <span #mpc_paren>)
+
+                        <span .mpc_elapsed>
+                            <span #mpc_cur>#{npCur np}
+                            <span #mpc_sep> / 
+                            <span #mpc_tot>#{npTot np}
+
+                    <p>
+                        <span #mpc_title>#{npTitle np}
+
+                \<!-- end now playing }}} -->
+
+                \<!-- playlist {{{ -->
+
+                \<!-- end playlist }}} -->
+
+                \<!-- player controls {{{ -->
+                <div .mpc_controls>
+                    <table>
+                        <tr>
+                            <td>
+                                <a #mpc_prev href="@{toMaster PrevR}">[ &lt;&lt; ]
+                            <td>
+                                <a #mpc_pp href="@{toMaster PauseR}">[ || ]
+                            <td>
+                                <a #mpc_next href="@{toMaster NextR}">[ &gt;&gt; ]
+
+                \<!-- end player controls }}} -->
+
+                \<!-- progress bar {{{ -->
+                <div #mpc_progress_outer>
+                    <div #mpc_progress_inner>&nbsp;
+
+                \<!-- end progress bar }}} -->
 
                 <script src="#{jQuery}">
                 <script>$(function() { getNowPlaying(); });
-                <noscript>
-                    <em>javascript is required for screenupdates
-                |]) (json mnp)
-    where
-        x <> "" = x
-        x <> y  = x ++ " - " ++ y
 
-        json mnp = case mnp of
-            Just np -> jsonMap
-                [ ("status"  , jsonScalar $ "OK"  )
-                , ("state"   , jsonScalar $ npState np               )
-                , ("title"   , jsonScalar $ npTitle np               )
-                , ("artist"  , jsonScalar $ npArtist np              )
-                , ("album"   , jsonScalar $ npAlbum np               )
-                , ("year"    , jsonScalar $ npYear np                )
-                , ("pos"     , jsonScalar . show $ npPos np          )
-                , ("id"      , jsonScalar . show $ npId np           )
-                , ("cur"     , jsonScalar $ npCur np                 )
-                , ("tot"     , jsonScalar $ npTot np                 )
-                , ("progress", jsonScalar . show $ npProg np         )
-                , ("coverurl", jsonScalar . fromMaybe "" $ npCover np)
-                ]
+                |]
+                -- }}}
+
+        htmlRep _  _ = do
+            setTitle $ toHtml "MPD"
+            [$hamlet|
+                <h1>MPD
+                <div .mpc_error>
+                    <p>
+                        <em>Unable to determine now playing info.
+                |]
+
+        jsonRep (Just np) (Just pl) = jsonMap
+            [ ("status"  , jsonScalar $ "OK"                     )
+            , ("state"   , jsonScalar $ npState np               )
+            , ("title"   , jsonScalar $ npTitle np               )
+            , ("artist"  , jsonScalar $ npArtist np              )
+            , ("album"   , jsonScalar $ npAlbum np               )
+            , ("year"    , jsonScalar $ npYear np                )
+            , ("pos"     , jsonScalar . show $ npPos np          )
+            , ("id"      , jsonScalar . show $ npId np           )
+            , ("cur"     , jsonScalar $ npCur np                 )
+            , ("tot"     , jsonScalar $ npTot np                 )
+            , ("progress", jsonScalar . show $ npProg np         )
+            , ("coverurl", jsonScalar . fromMaybe "" $ npCover np)
+            , ("playlist", jsonList $ map jsonItem pl            )
+            ]
                 
-            _ -> jsonMap
-                [ ("status", jsonScalar $ "ERR"               )
-                , ("error" , jsonScalar $ "MPD threw an error")
-                ]
+        jsonRep _ _ = jsonMap
+            [ ("status", jsonScalar $ "ERR"               )
+            , ("error" , jsonScalar $ "MPD threw an error")
+            ]
 
+        jsonItem item = jsonMap
+            [ ( "no"     , jsonScalar . show $ plNo item                          )
+            , ( "artist" , jsonScalar $ plArtist item                             )
+            , ( "album"  , jsonScalar $ plAlbum item                              )
+            , ( "title"  , jsonScalar $ plTitle item                              )
+            , ( "playing", jsonScalar $ if plPlaying item then "true" else "false")
+            ]
+
+-- Routes {{{
 -- | Previous
 getPrevR :: YesodMPC m => GHandler MPC m RepHtml
 getPrevR = authHelper >> actionRoute MPD.previous
@@ -267,202 +419,11 @@ actionRoute f = do
 
 -- }}}
 
--- Widgets {{{
--- | Show now playing info.
-nowPlayingWidget :: YesodMPC m => GWidget s m ()
-nowPlayingWidget = do
-    addJulius [$julius|
-        /* generic */
-        function updateTagById(_id, _newValue) {
-            var e = $("#" + _id);
-            if (e && e.html() != _newValue) { e.html(_newValue); }
-        }
-
-        /* provide a function for each tag */
-        function updateState( _val) { updateTagById("mpc_state" , _val); }
-        function updatePos(   _val) { updateTagById("mpc_pos"   , _val); }
-        function updateId(    _val) { updateTagById("mpc_id"    , _val); }
-        function updateTitle( _val) { updateTagById("mpc_title" , _val); }
-        function updateArtist(_val) { updateTagById("mpc_artist", _val); }
-        function updateAlbum( _val) { updateTagById("mpc_album" , _val); }
-        function updateYear(  _val) { updateTagById("mpc_year"  , _val); }
-        function updateCur(   _val) { updateTagById("mpc_cur"   , _val); }
-        function updateTot(   _val) { updateTagById("mpc_tot"   , _val); }
-
-        /* update the cover image */
-        function updateCover( _val) {
-            var e = $("#mpc_cover");
-            if (e && e.attr("src") != _val) { e.attr("src", _val); }
-        }
-        |]
-
-    addCassius [$cassius|
-        #mpc_cover
-            float: left
-            height: 75px
-            width: 75px
-            margin-right: 5px
-        #mpc_title
-            font-weight: bold
-            font-size: 200%
-            padding-left: 10px
-        .mpc_elapsed
-            float: right
-        |]
-
-    mnp <- lift nowPlaying
-    [$hamlet|
-        $maybe np <- mnp
-            <div .mpc_nowplaying>
-                $maybe cover <- npCover np
-                    <img id="mpc_cover" src="#{cover}">
-
-                <p>
-                    <span id="mpc_pos" style="display: none;">#{show (npPos np)}
-                    <span id="mpc_id" style="display: none;">#{show (npId np)}
-
-                    <span id="mpc_state">#{npState np}
-                    \ / 
-                    <span id="mpc_artist">#{npArtist np}
-                    \ - 
-                    <span id="mpc_album">#{npAlbum np}
-                    \ (
-                    <span id="mpc_year">#{npYear np}
-                    \)
-
-                    <span .mpc_elapsed>
-                        <span id="mpc_cur">#{npCur np}
-                        \ / 
-                        <span id="mpc_tot">#{npTot np}
-
-                <p>
-                    <span id="mpc_title">#{npTitle np}
-        |]
-
--- | Prev, Play/Pause, Next
-playerControlsWidget :: YesodMPC m 
-                     => (MPCRoute -> Route m) -- ^ your subsite route
-                     -> GWidget s m ()
-playerControlsWidget mpcR = do
-    addCassius [$cassius|
-        .mpc_controls table
-            margin-left: auto
-            margin-right: auto
-            padding: 5px
-            padding-top: 20px
-            padding-bottom: 20px
-        .mpc_controls a:link, .mpc_controls a:visited, .mpc_controls a:hover
-            outline: none
-            text-decoration: none
-        |]
-
-    addHamlet [$hamlet|
-        <div .mpc_controls>
-            <table>
-                <tr>
-                    <td>
-                        <a href="@{mpcR PrevR}">[ &lt;&lt; ]
-                    <td>
-                        <a href="@{mpcR PauseR}">[ || ]
-                    <td>
-                        <a href="@{mpcR NextR}">[ &gt;&gt; ]
-        |]
-
--- | A formatted play list, limited, auto-centered/highlighted on now 
---   playing.
-playListWidget :: YesodMPC m
-                  => (MPCRoute -> Route m) -- ^ your subsite route
-                  -> Int                   -- ^ limit display
-                  -> GWidget s m ()
-playListWidget mpcR limit = do
-    addCassius [$cassius|
-        .mpc_playlist table
-            margin-left: auto
-            margin-right: auto
-        .mpc_playlist th
-            border-bottom: solid 1px
-        .mpc_playlist td
-            padding-left: 5px
-            padding-right: 5px
-        tr.mpc_current
-            font-weight: bold
-        .mpc_playlist a:link, .mpc_playlist a:visited, .mpc_playlist a:hover
-            outline: none
-            text-decoration: none
-        |]
-
-    mnp <- lift nowPlaying
-    let pos = fromMaybe (-1) $ fmap npPos mnp
-    let cid = fromMaybe (-1) $ fmap npId  mnp
-
-    result <- lift . withMPD $ MPD.playlistInfo Nothing
-    let len = either (const 0) length result
-
-    -- find bounds to show len lines of context
-    let (lower,upper) = fixBounds pos len limit
-
-    -- get the limited, auto-centered playlist records
-    result' <- lift . withMPD $ MPD.playlistInfo (Just (lower, upper))
-
-    case result' of
-        Left err    -> addHamlet [$hamlet| <em>#{toHtml (show err)} |]
-        Right songs -> addHamlet [$hamlet|
-            <div .mpc_playlist>
-                <table>
-                    <tr>
-                        <th>No
-                        <th>Artist
-                        <th>Album
-                        <th>Title
-
-                    $forall song <- songs
-                        ^{formatSong song}
-
-            |]
-            where
-                formatSong song = let
-                    artist = getTag MPD.Artist song
-                    album  = getTag MPD.Album  song
-                    title  = getTag MPD.Title  song
-                    pid    = fromMaybe 0 . fmap snd $ MPD.sgIndex song
-                    in [$hamlet|
-                        <tr .#{clazz pid}>
-                            <td>
-                                <a href="@{mpcR (PlayR pid)}">#{toHtml (show pid)}
-                            <td>#{artist}
-                            <td>#{album}
-                            <td>#{title}
-                        |]
-
-                clazz x = if x == cid
-                    then toHtml "mpc_current"
-                    else toHtml "mpc_not_current"
-
--- | Show a \"progress bar\" by changing the width of a div element.
-progressBarWidget :: YesodMPC m => GWidget s m ()
-progressBarWidget = do
-    addJulius [$julius|
-        function updateProgress(_int) {
-            var e = $("#mpc_progress_inner");
-            if (e) { e.css( { width: _int + "%" } ); }
-        }
-        |]
-
-    addCassius [$cassius|
-        #mpc_progress_inner
-            width: 0px
-            border-bottom: 2px solid
-        |]
-
-    addHamlet [$hamlet|
-        <div id="mpc_progress_outer">
-            <div id="mpc_progress_inner">&nbsp;
-        |]
--- }}}
-
 -- Helpers {{{
--- | Show playlist context with now playing centered but ensure we don't 
---   send invalid upper and lower bounds to the request
+
+-- | Given the current song, length of current playlist, and how many 
+--   lines of context to show, return the correct upper and lower bounds
+--   to send to a MPD.playListInfo command to get the context playlist
 fixBounds :: Int -- ^ pos of currently playing track
           -> Int -- ^ length of current playlist
           -> Int -- ^ how many lines of context to show
@@ -478,9 +439,13 @@ fixBounds pos len limit = let
             | u > len          = fixBounds (pos - (u - len)) len limit
             | otherwise        = (l,u)
 
--- | Get the first instance of the given tag in the the passed song, 
---   return "N/A" if it's not found
 getTag :: MPD.Metadata -> MPD.Song -> String
 getTag tag = head . fromMaybe ["N/A"] . MPD.sgGet tag
 
--- }}
+-- | Conditionally apply the monadic f to the maybe value when it is 
+--   Just, wrap the /inner/ value in Just, or return Nothing
+(=<?) :: (Monad m) => (a -> m b) -> Maybe a -> m (Maybe b)
+f =<? (Just a) = return . Just =<< f a
+f =<?  Nothing = return Nothing
+
+-- }}}

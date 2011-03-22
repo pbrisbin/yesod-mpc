@@ -15,7 +15,7 @@ import Network.Wai.Handler.Warp (run)
 data MpcTest = MpcTest
 
 -- | Have an mpc route
-mkYesod "MpcTest" [$parseRoutes| /mpc MpcR MPC getMPC |]
+mkYesod "MpcTest" [$parseRoutes| / MpcR MPC getMPC |]
 
 instance Yesod MpcTest where approot _ = ""
 
