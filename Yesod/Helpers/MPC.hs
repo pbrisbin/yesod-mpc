@@ -59,15 +59,16 @@ data NowPlaying = NowPlaying
     , npCover  :: Maybe String -- ^ url to cover image if setup
     }
 
-data PlayListItem = PlayListItem
+data PlayListItem url = PlayListItem
     { plNo      :: Int
     , plArtist  :: String
     , plAlbum   :: String
     , plTitle   :: String
     , plPlaying :: Bool
+    , plRoute   :: url
     }
 
-type PlayList = [PlayListItem]
+type PlayList url = [PlayListItem url]
 
 -- | Customize your connection to MPD
 data MpdConfig = MpdConfig
@@ -162,7 +163,7 @@ nowPlaying = do
         progress (d,i) = (*100) (d / realToFrac i)
 
 -- | Return the current playlist context or the empty list
-playList :: YesodMPC m => NowPlaying -> GHandler s m (PlayList)
+playList :: YesodMPC m => NowPlaying -> GHandler s m (PlayList MPCRoute)
 playList np = do
     -- determine overall playlist length
     len <- return . either (const 0) length =<< withMPD (MPD.playlistInfo Nothing)
@@ -174,14 +175,16 @@ playList np = do
         Right songs -> return $ map (itemFromSong $ npId np) songs
 
     where
-        itemFromSong :: Int -> MPD.Song -> PlayListItem
-        itemFromSong cid song = PlayListItem
-            { plArtist  = getTag MPD.Artist song
-            , plAlbum   = getTag MPD.Album  song
-            , plTitle   = getTag MPD.Title  song
-            , plNo      = fromMaybe 0 . fmap snd $ MPD.sgIndex song
-            , plPlaying = cid == (fromMaybe (-1) . fmap snd $ MPD.sgIndex song)
-            }
+        itemFromSong :: Int -> MPD.Song -> PlayListItem MPCRoute
+        itemFromSong cid song = let num = fromMaybe 0 . fmap snd $ MPD.sgIndex song
+            in PlayListItem
+                { plArtist  = getTag MPD.Artist song
+                , plAlbum   = getTag MPD.Album  song
+                , plTitle   = getTag MPD.Title  song
+                , plNo      = num
+                , plPlaying = cid == num
+                , plRoute   = PlayR num
+                }
 
 -- | Main page
 getStatusR :: YesodMPC m => GHandler MPC m RepHtmlJson
@@ -190,19 +193,43 @@ getStatusR = do
     mnp <- nowPlaying
     mpl <- playList =<? mnp
 
+    tm <- getRouteToMaster
+    r  <- getUrlRender
+
     -- reply with main html view or json updates
-    defaultLayoutJson (htmlRep mnp mpl) (jsonRep mnp mpl)
+    defaultLayoutJson (htmlRep mnp mpl) (jsonRep tm r mnp mpl)
         
     where
         htmlRep (Just np) (Just pl) = do
-            toMaster <- lift $ getRouteToMaster
+            jQuery   <- lift jQueryUrl
+            toMaster <- lift getRouteToMaster
             delay    <- lift $ fmap (*1000) refreshSpeed
-            jQuery   <- lift $ jQueryUrl
            
             setTitle $ toHtml ("MPD - " ++ npTitle np)
             
             -- javascript {{{
             addJulius [$julius|
+                // add all rows of a playlist item as a table
+                function addRows(_playlist) {
+                    var ret = "";
+
+                    for (var i in _playlist) {
+                        var item = _playlist[i];
+
+                        // todo: fix Yesod.Json to send booleans
+                        ret += item.playing == "true" ? '<tr class="mpc_current">' : '<tr>';
+
+                        ret += '<td><a href="' + item.route + '">' + item.no + "</a></td>"
+                            +  "<td>" + item.artist + "</td>"
+                            +  "<td>" + item.album  + "</td>"
+                            +  "<td>" + item.title  + "</td>"
+
+                        ret += "</tr>"
+                    }
+
+                    return ret;
+                }
+
                 function getNowPlaying() {
                     var delay = #{show delay}; // server-set variable
 
@@ -234,6 +261,15 @@ getStatusR = do
 
                                     // update cover image
                                     if (o.cover != $("#mpc_cover").attr("src")) $("#mpc_cover").attr("src", o.cover);
+
+                                    // update progress
+                                    $("#mpc_progress_inner").css( { width: o.progress + "%" } );
+
+                                    // update playlist
+                                    $(".mpc_playlist").html("<table>"
+                                        + "<tr><th>No</th><th>Artist</th><th>Album</th><th>Title</th></tr>"
+                                        + addRows(o.playlist)
+                                        + "</table>");
                                 }
                             }
                         });
@@ -314,6 +350,29 @@ getStatusR = do
                 \<!-- end now playing }}} -->
 
                 \<!-- playlist {{{ -->
+                <div .mpc_playlist>
+                    <table>
+                        <tr>
+                            <th>No
+                            <th>Artist
+                            <th>Album
+                            <th>Title
+
+                        $forall item <- pl
+                            $if plPlaying item
+                                <tr.mpc_current>
+                                    <td>
+                                        <a href="@{toMaster $ plRoute item}">#{show $ plNo item}
+                                    <td>#{plArtist item}
+                                    <td>#{plAlbum item}
+                                    <Td>#{plTitle item}
+                            $else
+                                <tr>
+                                    <td>
+                                        <a href="@{toMaster $ plRoute item}">#{show $ plNo item}
+                                    <td>#{plArtist item}
+                                    <td>#{plAlbum item}
+                                    <Td>#{plTitle item}
 
                 \<!-- end playlist }}} -->
 
@@ -351,7 +410,7 @@ getStatusR = do
                         <em>Unable to determine now playing info.
                 |]
 
-        jsonRep (Just np) (Just pl) = jsonMap
+        jsonRep tm r (Just np) (Just pl) = jsonMap
             [ ("status"  , jsonScalar $ "OK"                     )
             , ("state"   , jsonScalar $ npState np               )
             , ("title"   , jsonScalar $ npTitle np               )
@@ -364,20 +423,21 @@ getStatusR = do
             , ("tot"     , jsonScalar $ npTot np                 )
             , ("progress", jsonScalar . show $ npProg np         )
             , ("coverurl", jsonScalar . fromMaybe "" $ npCover np)
-            , ("playlist", jsonList $ map jsonItem pl            )
+            , ("playlist", jsonList $ map (jsonItem tm r) pl     )
             ]
                 
-        jsonRep _ _ = jsonMap
+        jsonRep _ _ _ _ = jsonMap
             [ ("status", jsonScalar $ "ERR"               )
             , ("error" , jsonScalar $ "MPD threw an error")
             ]
 
-        jsonItem item = jsonMap
+        jsonItem tm r item = jsonMap
             [ ( "no"     , jsonScalar . show $ plNo item                          )
             , ( "artist" , jsonScalar $ plArtist item                             )
             , ( "album"  , jsonScalar $ plAlbum item                              )
             , ( "title"  , jsonScalar $ plTitle item                              )
             , ( "playing", jsonScalar $ if plPlaying item then "true" else "false")
+            , ( "route"  , jsonScalar . r . tm . PlayR $ plNo item                )
             ]
 
 -- Routes {{{
