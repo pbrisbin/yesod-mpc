@@ -260,7 +260,14 @@ getStatusR = do
                                     }
 
                                     // update cover image
-                                    if (o.coverurl != $("#mpc_cover").attr("src")) $("#mpc_cover").attr("src", o.coverurl);
+                                    if (o.coverurl != $("#mpc_cover").attr("src")) {
+                                        if (o.coverurl) {
+                                            $("#mpc_cover").css( { display: "block" } ).attr("src", o.coverurl);
+                                        }
+                                        else {
+                                            $("#mpc_cover").css( { display: "none" } );
+                                        }
+                                    }
 
                                     // update progress
                                     $("#mpc_progress_inner").css( { width: o.progress + "%" } );
@@ -324,7 +331,9 @@ getStatusR = do
                 \<!-- now playing {{{ -->
                 <div .mpc_nowplaying>
                     $maybe cover <- npCover np
-                        <img #mpc_cover src="#{cover}">
+                        <img #mpc_cover style="display: block;" src="#{cover}">
+                    $nothing
+                        <img #mpc_cover style="display: none;" src="">
 
                     <p>
                         <span #mpc_pos style="display: none;">#{show $ npPos np}
