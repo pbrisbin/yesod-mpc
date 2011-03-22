@@ -22,7 +22,7 @@ install` from within the yesod-mpc directory.
     git clone git://github.com/pbrisbin/yesod-mpc.git
     cd yesod-mpc
     runhaskell Test.hs
-    $BROWSER http://localhost:3000/mpc
+    $BROWSER http://localhost:3000
 
 Here's what it looks like on my server:
 
