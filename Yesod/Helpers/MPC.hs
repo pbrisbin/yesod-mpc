@@ -260,7 +260,7 @@ getStatusR = do
                                     }
 
                                     // update cover image
-                                    if (o.cover != $("#mpc_cover").attr("src")) $("#mpc_cover").attr("src", o.cover);
+                                    if (o.coverurl != $("#mpc_cover").attr("src")) $("#mpc_cover").attr("src", o.coverurl);
 
                                     // update progress
                                     $("#mpc_progress_inner").css( { width: o.progress + "%" } );
