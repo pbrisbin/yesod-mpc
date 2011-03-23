@@ -209,6 +209,29 @@ getStatusR = do
             
             -- javascript {{{
             addJulius [$julius|
+                function buttonEvent(e) {
+                    var prevR  = "@{toMaster PrevR}";
+                    var pauseR = "@{toMaster PauseR}";
+                    var nextR  = "@{toMaster NextR}";
+
+                    switch(e.id) {
+                        case "mpc_prev":
+                            $.getJSON(prevR, {}, function(o) { return true; });
+                            break;
+
+                        case "mpc_pp":
+                            $.getJSON(pauseR, {}, function(o) { return true; });
+                            break;
+
+                        case "mpc_next":
+                            $.getJSON(nextR, {}, function(o) { return true; });
+                            break;
+                    }
+
+                    // disable normal behavior
+                    return false;
+                }
+
                 // add all rows of a playlist item as a table
                 function addRows(_playlist) {
                     var ret = "";
@@ -307,17 +330,18 @@ getStatusR = do
                     border-bottom: solid 1px
                 .mpc_playlist td
                     padding: 2px 5px;
-                tr.mpc_current
-                    font-weight: bold
                 .mpc_playlist a:link, .mpc_playlist a:visited, .mpc_playlist a:hover
                     outline:         none
                     text-decoration: none
+                tr.mpc_current
+                    font-weight: bold
                 .mpc_controls table
                     margin:  0px auto;
-                    padding: 5px 20px;
-                .mpc_controls a:link, .mpc_controls a:visited, .mpc_controls a:hover
-                    outline:         none
-                    text-decoration: none
+                .mpc_controls
+                    font-size: 115%;
+                input#mpc_pp
+                    font-size: 130%;
+                    padding: 0px 1ex;
                 #mpc_progress_inner
                     width:         0px
                     border-bottom: 3px solid
@@ -390,11 +414,11 @@ getStatusR = do
                     <table>
                         <tr>
                             <td>
-                                <a #mpc_prev href="@{toMaster PrevR}">[ &lt;&lt; ]
+                                <input #mpc_prev type="submit" value="&#9664;&#9664;" onclick="buttonEvent(this);">
                             <td>
-                                <a #mpc_pp href="@{toMaster PauseR}">[ || ]
+                                <input #mpc_pp type="submit" value="&#9654;" onclick="buttonEvent(this);">
                             <td>
-                                <a #mpc_next href="@{toMaster NextR}">[ &gt;&gt; ]
+                                <input #mpc_next type="submit" value="&#9654;&#9654;" onclick="buttonEvent(this);">
 
                 \<!-- end player controls }}} -->
 
@@ -451,11 +475,11 @@ getStatusR = do
 
 -- Routes {{{
 -- | Previous
-getPrevR :: YesodMPC m => GHandler MPC m RepHtml
+getPrevR :: YesodMPC m => GHandler MPC m RepHtmlJson
 getPrevR = authHelper >> actionRoute MPD.previous
 
 -- | Smart play/pause button
-getPauseR :: YesodMPC m => GHandler MPC m RepHtml
+getPauseR :: YesodMPC m => GHandler MPC m RepHtmlJson
 getPauseR = authHelper >> getPlayPause >>= actionRoute
     where
         -- | return the correct function given the current state
@@ -469,18 +493,18 @@ getPauseR = authHelper >> getPlayPause >>= actionRoute
                     MPD.Paused  -> MPD.play Nothing
 
 -- | Next
-getNextR :: YesodMPC m => GHandler MPC m RepHtml
+getNextR :: YesodMPC m => GHandler MPC m RepHtmlJson
 getNextR = authHelper >> actionRoute MPD.next
 
 -- | Play a specific song in playlist
-getPlayR :: YesodMPC m => Int -> GHandler MPC m RepHtml
+getPlayR :: YesodMPC m => Int -> GHandler MPC m RepHtmlJson
 getPlayR pid = authHelper >> actionRoute (MPD.playId pid)
 
-getDelR :: YesodMPC m => Int -> GHandler MPC m RepHtml
+getDelR :: YesodMPC m => Int -> GHandler MPC m RepHtmlJson
 getDelR pid = authHelper >> actionRoute (MPD.deleteId pid)
 
 -- | Execute any mpd action then redirect back to the main status page
-actionRoute :: YesodMPC m => MPD.MPD a -> GHandler MPC m RepHtml
+actionRoute :: YesodMPC m => MPD.MPD a -> GHandler MPC m RepHtmlJson
 actionRoute f = do
     toMaster <- getRouteToMaster
     _        <- withMPD f
