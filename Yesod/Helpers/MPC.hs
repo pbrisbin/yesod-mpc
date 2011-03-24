@@ -311,13 +311,13 @@ getStatusR = do
                         // update play/pause button
                         switch (o.state) {
                             case "playing":
-                                $("#mpc_play").css(  { display: "none"  });
-                                $("#mpc_pause").css( { display: "block" });
+                                $("#mpc_play").css(  { display: "none"         });
+                                $("#mpc_pause").css( { display: "inline-block" });
                                 break;
 
                             default:
-                                $("#mpc_play").css(  { display: "block" });
-                                $("#mpc_pause").css( { display: "none"  });
+                                $("#mpc_play").css(  { display: "inline-block" });
+                                $("#mpc_pause").css( { display: "none"         });
                                 break;
                         }
                     }
@@ -435,10 +435,10 @@ getStatusR = do
                                 <input #mpc_prev type="submit" value="&#9664;&#9664;" onclick="buttonEvent(this);">
                             <td>
                                 $if playing
-                                    <input .mpc_pp #mpc_pause style="display: block;"  type="submit" value="&#9655;" onclick="buttonEvent(this);">
+                                    <input .mpc_pp #mpc_pause style="display: inline-block;" type="submit" value="&#9655;" onclick="buttonEvent(this);">
                                     <input .mpc_pp #mpc_play  style="display: none;" type="submit" value="&#9654;" onclick="buttonEvent(this);">
                                 $else
-                                    <input .mpc_pp #mpc_pause style="display: block;"  type="submit" value="&#9655;" onclick="buttonEvent(this);">
+                                    <input .mpc_pp #mpc_pause style="display: inline-block;" type="submit" value="&#9655;" onclick="buttonEvent(this);">
                                     <input .mpc_pp #mpc_play  style="display: none;" type="submit" value="&#9654;" onclick="buttonEvent(this);">
                             <td>
                                 <input #mpc_next type="submit" value="&#9654;&#9654;" onclick="buttonEvent(this);">
