@@ -206,9 +206,14 @@ getStatusR = do
             delay  <- lift $ fmap (*1000) refreshSpeed
            
             setTitle $ toHtml ("MPD - " ++ npTitle np)
+
+            let playing = npState np == "playing"
             
             -- javascript {{{
             addJulius [$julius|
+                // global, server-set variable
+                var delay = #{show delay};
+
                 function buttonEvent(e) {
                     var prevR  = "@{toMaster PrevR}";
                     var pauseR = "@{toMaster PauseR}";
@@ -216,15 +221,16 @@ getStatusR = do
 
                     switch(e.id) {
                         case "mpc_prev":
-                            $.getJSON(prevR, {}, function(o) { return true; });
+                            $.getJSON(prevR, {}, ajaxUpdate);
                             break;
 
-                        case "mpc_pp":
-                            $.getJSON(pauseR, {}, function(o) { return true; });
+                        case "mpc_play":
+                        case "mpc_pause":
+                            $.getJSON(pauseR, {}, ajaxUpdate);
                             break;
 
                         case "mpc_next":
-                            $.getJSON(nextR, {}, function(o) { return true; });
+                            $.getJSON(nextR, {}, ajaxUpdate);
                             break;
                     }
 
@@ -232,118 +238,100 @@ getStatusR = do
                     return false;
                 }
 
-                // add all rows of a playlist item as a table
-                function addRows(_playlist) {
-                    var ret = "";
+                function updatePlaylist(playlist) {
+                    var html = "";
 
-                    for (var i in _playlist) {
-                        var item = _playlist[i];
+                    html += "<table>";
+                    html += "<tr><th>No</th><th>Artist</th><th>Album</th><th>Title</th></tr>";
 
-                        // todo: fix Yesod.Json to send booleans
-                        ret += item.playing == "true" ? '<tr class="mpc_current">' : '<tr>';
+                    for (var i in playlist) {
+                        var item = playlist[i];
 
-                        ret += '<td><a href="' + item.route + '">' + item.no + "</a></td>"
+                        // Yesod.Json only sends strings
+                        html += item.playing == "true" ? '<tr class="mpc_current">' : '<tr>';
+
+                        html += '<td><a href="' + item.route + '">' + item.no + "</a></td>"
                             +  "<td>" + item.artist + "</td>"
                             +  "<td>" + item.album  + "</td>"
-                            +  "<td>" + item.title  + "</td>"
+                            +  "<td>" + item.title  + "</td>";
 
-                        ret += "</tr>"
+                        html += "</tr>";
+                    }
+                    
+                    html += "</table>";
+
+                    $(".mpc_playlist").html(html);
+                }
+
+                function ajaxUpdate(o) {
+                    if (o.status != "OK") {
+                        // mpd threw some error
+                        return;
                     }
 
-                    return ret;
+                    if (o.pos != $("#mpc_pos").text() || o.id  != $("#mpc_id").text()) {
+                        // track's changed, more needs to update
+                        var t = $("#mpc_title");
+
+                        if (t && o.title != t.text()) {
+                            t.text(o.title);
+                            document.title = "MPD - " + o.title;
+                        }
+
+                        var a = $("#mpc_artist");
+                        var b = $("#mpc_album");
+                        var y = $("#mpc_year");
+
+                        if (a && o.artist != a.text()) a.text(o.artist);
+                        if (b && o.album  != b.text()) b.text(o.album);
+                        if (y && o.year   != y.text()) y.text(o.year);
+
+                        // update cover image
+                        var c = $("#mpc_cover");
+
+                        if (c && o.coverurl != c.attr("src")) {
+                            if (o.coverurl)
+                                c.attr("src", o.coverurl).css( { display: "block" } );
+                            else
+                                c.css( { display: "none" } );
+                        }
+
+                        updatePlaylist(o.playlist);
+                    }
+
+                    // these update every time
+                    $("#mpc_progress_inner").css( { width: o.progress + "%" } );
+
+                    var cu = $("#mpc_cur");
+                    var to = $("#mpc_tot");
+
+
+                    if (cu && o.cur != cu.text()) cu.text(o.cur);
+                    if (to && o.tot != to.text()) to.text(o.tot);
+
+                    var s  = $("#mpc_state");
+
+                    if (s && o.state != s.text()) {
+                        s.text(o.state);
+
+                        // update play/pause button
+                        switch (o.state) {
+                            case "playing":
+                                $("#mpc_play").css(  { display: "none"  });
+                                $("#mpc_pause").css( { display: "block" });
+                                break;
+
+                            default:
+                                $("#mpc_play").css(  { display: "block" });
+                                $("#mpc_pause").css( { display: "none"  });
+                                break;
+                        }
+                    }
                 }
 
                 function getNowPlaying() {
-                    var delay = #{show delay}; // server-set variable
-
                     if (delay != 0) {
-                        $.getJSON(window.location.href, {}, function(o) {
-                            if (o.status == "OK") {
-                                if (o.pos == $("#mpc_pos").text() && o.id  == $("#mpc_id").text()) {
-                                    // same track only update a few indicators
-                                    if (o.tot   != $("#mpc_tot").text())   $("#mpc_tot").text(o.tot);
-                                    if (o.cur   != $("#mpc_cur").text())   $("#mpc_cur").text(o.cur);
-                                    if (o.state != $("#mpc_state").text()) $("#mpc_state").text(o.state);
-
-                                    // update progress
-                                    $("#mpc_progress_inner").css( { width: o.progress + "%" } );
-
-                                    // update PP button
-                                    /* todo: html entities aren't working right
-                                    var pp = $("#mpc_pp");
-
-                                    if (pp && !pp.hasClass(o.state)) {
-                                        pp.removeClass();
-                                        pp.addClass(o.state);
-
-                                        switch (o.state) {
-                                            case "playing":
-                                                pp.attr("value", "||");
-                                                break;
-
-                                            default:
-                                                pp.attr("value","&#9654;");
-                                                break;
-                                        }
-                                    }
-                                    */
-                                }
-                                else {
-                                    // new track, update everything
-                                    if (o.state  != $("#mpc_state").text())  $("#mpc_state").text(o.state);
-                                    if (o.tot    != $("#mpc_tot").text())    $("#mpc_tot").text(o.tot);
-                                    if (o.cur    != $("#mpc_cur").text())    $("#mpc_cur").text(o.cur);
-                                    if (o.artist != $("#mpc_artist").text()) $("#mpc_artist").text(o.artist);
-                                    if (o.album  != $("#mpc_album").text())  $("#mpc_album").text(o.album);
-                                    if (o.year   != $("#mpc_year").text())   $("#mpc_year").text(o.year);
-
-                                    if (o.title != $("#mpc_title").text()) {
-                                        $("#mpc_title").text(o.title);
-                                        document.title = "MPD - " + o.title;
-                                    }
-
-                                    // update cover image
-                                    if (o.coverurl != $("#mpc_cover").attr("src")) {
-                                        if (o.coverurl) {
-                                            $("#mpc_cover").css( { display: "block" } ).attr("src", o.coverurl);
-                                        }
-                                        else {
-                                            $("#mpc_cover").css( { display: "none" } );
-                                        }
-                                    }
-
-                                    // update progress
-                                    $("#mpc_progress_inner").css( { width: o.progress + "%" } );
-
-                                    // update PP button
-                                    /* todo: htmlentities aren't working...
-                                    var pp = $("#mpc_pp");
-
-                                    if (pp && !pp.hasClass(o.state)) {
-                                        pp.removeClass();
-                                        pp.addClass(o.state);
-
-                                        switch (o.state) {
-                                            case "playing":
-                                                pp.val("||");
-                                                break;
-
-                                            default:
-                                                pp.val("&#9654");
-                                                break;
-                                        }
-                                    }
-                                    */
-
-                                    // update playlist
-                                    $(".mpc_playlist").html("<table>"
-                                        + "<tr><th>No</th><th>Artist</th><th>Album</th><th>Title</th></tr>"
-                                        + addRows(o.playlist)
-                                        + "</table>");
-                                }
-                            }
-                        });
-
+                        $.getJSON(window.location.href, {}, ajaxUpdate);
                         setTimeout("getNowPlaying();", delay);
                     }
                 }
@@ -379,7 +367,7 @@ getStatusR = do
                     margin:  0px auto;
                 .mpc_controls
                     font-size: 115%;
-                input#mpc_pp
+                input.mpc_pp
                     font-size: 130%;
                     padding: 0px 1ex;
                 #mpc_progress_inner
@@ -392,7 +380,6 @@ getStatusR = do
             [$hamlet|
                 <h1>MPD
 
-                \<!-- now playing {{{ -->
                 <div .mpc_nowplaying>
                     $maybe cover <- npCover np
                         <img #mpc_cover style="display: block;" src="#{cover}">
@@ -420,9 +407,6 @@ getStatusR = do
                     <p>
                         <span #mpc_title>#{npTitle np}
 
-                \<!-- end now playing }}} -->
-
-                \<!-- playlist {{{ -->
                 <div .mpc_playlist>
                     <table>
                         <tr>
@@ -447,26 +431,24 @@ getStatusR = do
                                     <td>#{plAlbum item}
                                     <Td>#{plTitle item}
 
-                \<!-- end playlist }}} -->
-
-                \<!-- player controls {{{ -->
                 <div .mpc_controls>
                     <table>
                         <tr>
                             <td>
                                 <input #mpc_prev type="submit" value="&#9664;&#9664;" onclick="buttonEvent(this);">
                             <td>
-                                <input #mpc_pp .paused type="submit" value="&#9654;" onclick="buttonEvent(this);">
+                                $if playing
+                                    <input .mpc_pp #mpc_pause style="display: block;"  type="submit" value="&#9655;" onclick="buttonEvent(this);">
+                                    <input .mpc_pp #mpc_play  style="display: none;" type="submit" value="&#9654;" onclick="buttonEvent(this);">
+                                $else
+                                    <input .mpc_pp #mpc_pause style="display: block;"  type="submit" value="&#9655;" onclick="buttonEvent(this);">
+                                    <input .mpc_pp #mpc_play  style="display: none;" type="submit" value="&#9654;" onclick="buttonEvent(this);">
                             <td>
                                 <input #mpc_next type="submit" value="&#9654;&#9654;" onclick="buttonEvent(this);">
 
-                \<!-- end player controls }}} -->
-
-                \<!-- progress bar {{{ -->
                 <div #mpc_progress_outer>
                     <div #mpc_progress_inner>&nbsp;
 
-                \<!-- end progress bar }}} -->
 
                 <script src="#{jQuery}">
                 <script>$(function() { getNowPlaying(); });
