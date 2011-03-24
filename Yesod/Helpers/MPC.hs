@@ -130,22 +130,18 @@ nowPlaying = do
     stateResp <- withMPD MPD.status
     case (songResp,stateResp) of
         (Right (Just song), Right state) -> do
-
             let artist = getTag MPD.Artist song
             let album  = getTag MPD.Album  song
             let pos    = fromMaybe (-1) . fmap fst $ MPD.sgIndex song
             let id     = fromMaybe (-1) . fmap snd $ MPD.sgIndex song
 
+            coverurl <- albumArtHelper (artist,album)
             playlist <- do
-                len <- return . either (const 0) length =<< withMPD (MPD.playlistInfo Nothing)
-                let bounds = Just $ fixBounds (pos) len 10 -- increase context here if desired
-
-                result <- withMPD $ MPD.playlistInfo bounds
+                len    <- return . either (const 0) length =<< withMPD (MPD.playlistInfo Nothing)
+                result <- withMPD $ MPD.playlistInfo (Just $ fixBounds pos len 10)
                 case result of
                     Left _      -> return []
-                    Right songs -> return $ map (itemFromSong $ id) songs
-
-            coverurl <- albumArtHelper (artist,album)
+                    Right songs -> return $ map (itemFromSong id) songs
 
             return $ Just NowPlaying
                 { npTitle    = getTag MPD.Title song
@@ -192,10 +188,9 @@ nowPlaying = do
 getStatusR :: YesodMPC m => GHandler MPC m RepHtmlJson
 getStatusR = do
     authHelper
+    tm  <- getRouteToMaster
+    r   <- getUrlRender
     mnp <- nowPlaying
-
-    tm <- getRouteToMaster
-    r  <- getUrlRender
 
     -- reply with main html view or json updates
     defaultLayoutJson (htmlRep tm mnp) (jsonRep tm r mnp)
@@ -211,9 +206,7 @@ getStatusR = do
             
             -- javascript {{{
             addJulius [$julius|
-                // global, server-set variable
-                var delay = #{show delay};
-
+                /* click events */
                 function buttonEvent(e) {
                     var prevR  = "@{toMaster PrevR}";
                     var pauseR = "@{toMaster PauseR}";
@@ -238,6 +231,7 @@ getStatusR = do
                     return false;
                 }
 
+                /* repopulate the playlist table on track changes */
                 function updatePlaylist(playlist) {
                     var html = "";
 
@@ -251,9 +245,9 @@ getStatusR = do
                         html += item.playing == "true" ? '<tr class="mpc_current">' : '<tr>';
 
                         html += '<td><a href="' + item.route + '">' + item.no + "</a></td>"
-                            +  "<td>" + item.artist + "</td>"
-                            +  "<td>" + item.album  + "</td>"
-                            +  "<td>" + item.title  + "</td>";
+                             +  "<td>" + item.artist + "</td>"
+                             +  "<td>" + item.album  + "</td>"
+                             +  "<td>" + item.title  + "</td>";
 
                         html += "</tr>";
                     }
@@ -263,9 +257,10 @@ getStatusR = do
                     $(".mpc_playlist").html(html);
                 }
 
+                /* callback for updated now playing info */
                 function ajaxUpdate(o) {
                     if (o.status != "OK") {
-                        // mpd threw some error
+                        // mpd threw some error, bail
                         return;
                     }
 
@@ -305,11 +300,10 @@ getStatusR = do
                     var cu = $("#mpc_cur");
                     var to = $("#mpc_tot");
 
-
                     if (cu && o.cur != cu.text()) cu.text(o.cur);
                     if (to && o.tot != to.text()) to.text(o.tot);
 
-                    var s  = $("#mpc_state");
+                    var s = $("#mpc_state");
 
                     if (s && o.state != s.text()) {
                         s.text(o.state);
@@ -329,7 +323,10 @@ getStatusR = do
                     }
                 }
 
+                /* called on document to kick it off */
                 function getNowPlaying() {
+                    var delay = #{show delay}; // server-set
+
                     if (delay != 0) {
                         $.getJSON(window.location.href, {}, ajaxUpdate);
                         setTimeout("getNowPlaying();", delay);
