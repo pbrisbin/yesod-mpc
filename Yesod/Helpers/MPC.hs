@@ -130,18 +130,18 @@ nowPlaying = do
     stateResp <- withMPD MPD.status
     case (songResp,stateResp) of
         (Right (Just song), Right state) -> do
-            let artist = getTag MPD.Artist song
-            let album  = getTag MPD.Album  song
-            let pos    = fromMaybe (-1) . fmap fst $ MPD.sgIndex song
-            let id     = fromMaybe (-1) . fmap snd $ MPD.sgIndex song
+            let artist = shorten 20 $ getTag MPD.Artist song
+            let album  = shorten 20 $ getTag MPD.Album  song
+            let sPos   = fromMaybe (-1) . fmap fst $ MPD.sgIndex song
+            let sId    = fromMaybe (-1) . fmap snd $ MPD.sgIndex song
 
             coverurl <- albumArtHelper (artist,album)
             playlist <- do
                 len    <- return . either (const 0) length =<< withMPD (MPD.playlistInfo Nothing)
-                result <- withMPD $ MPD.playlistInfo (Just $ fixBounds pos len 10)
+                result <- withMPD $ MPD.playlistInfo (Just $ fixBounds sPos len 10)
                 case result of
                     Left _      -> return []
-                    Right songs -> return $ map (itemFromSong id) songs
+                    Right songs -> return $ map (itemFromSong sId) songs
 
             return $ Just NowPlaying
                 { npTitle    = getTag MPD.Title song
@@ -152,8 +152,8 @@ nowPlaying = do
                     MPD.Playing -> "playing"
                     MPD.Paused  -> "paused"
                     MPD.Stopped -> "stopped"
-                , npPos      = pos
-                , npId       = id
+                , npPos      = sPos
+                , npId       = sId
                 , npCur      = format . round . fst $ MPD.stTime state
                 , npTot      = format .         snd $ MPD.stTime state
                 , npProg     = progress $ MPD.stTime state
@@ -176,13 +176,16 @@ nowPlaying = do
         itemFromSong :: Int -> MPD.Song -> PlaylistItem MPCRoute
         itemFromSong cid song = let num = fromMaybe 0 . fmap snd $ MPD.sgIndex song
             in PlaylistItem
-                { plArtist  = getTag MPD.Artist song
-                , plAlbum   = getTag MPD.Album  song
-                , plTitle   = getTag MPD.Title  song
+                { plArtist  = shorten 20 $ getTag MPD.Artist song
+                , plAlbum   = shorten 20 $ getTag MPD.Album  song
+                , plTitle   = shorten 30 $ getTag MPD.Title  song
                 , plNo      = num
                 , plPlaying = cid == num
                 , plRoute   = PlayR num
                 }
+
+        shorten :: Int -> String -> String
+        shorten n s = if length s > n then take n s ++ "..." else s
 
 -- | Main page
 getStatusR :: YesodMPC m => GHandler MPC m RepHtmlJson
