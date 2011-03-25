@@ -31,6 +31,7 @@ module Yesod.Helpers.MPC
     , NowPlaying(..)
     , nowPlaying
     , PlaylistItem(..)
+    , contextPlaylist
     ) where
 
 import Yesod
@@ -122,26 +123,21 @@ withMPD f = do
         Nothing -> MPD.withMPD f
         Just c  -> MPD.withMPDEx (mpdHost c) (mpdPort c) (mpdPassword c) f
 
--- | Return now playing info or nothing. Includes playlist info as 10 
---   lines of context with currently playing in the middle
+-- | Return now playing info or nothing
 nowPlaying :: YesodMPC m => GHandler s m (Maybe (NowPlaying MPCRoute))
 nowPlaying = do
     songResp  <- withMPD MPD.currentSong
     stateResp <- withMPD MPD.status
-    case (songResp,stateResp) of
+
+    case (songResp, stateResp) of
         (Right (Just song), Right state) -> do
             let artist = shorten 20 $ getTag MPD.Artist song
             let album  = shorten 20 $ getTag MPD.Album  song
             let sPos   = fromMaybe (-1) . fmap fst $ MPD.sgIndex song
             let sId    = fromMaybe (-1) . fmap snd $ MPD.sgIndex song
 
+            playlist <- contextPlaylist sPos sId 10 -- limit
             coverurl <- albumArtHelper (artist,album)
-            playlist <- do
-                len    <- return . either (const 0) length =<< withMPD (MPD.playlistInfo Nothing)
-                result <- withMPD $ MPD.playlistInfo (Just $ fixBounds sPos len 10)
-                case result of
-                    Left _      -> return []
-                    Right songs -> return $ map (itemFromSong sId) songs
 
             return $ Just NowPlaying
                 { npTitle    = getTag MPD.Title song
@@ -161,7 +157,7 @@ nowPlaying = do
                 , npPlaylist = playlist
                 } 
 
-        -- todo: make this an Either and return the error(s)
+        -- todo: make this an Either and return the error(s)?
         _ -> return Nothing
 
     where
@@ -173,6 +169,20 @@ nowPlaying = do
         progress :: (Double, MPD.Seconds) -> Double
         progress (d,i) = (*100) (d / realToFrac i)
 
+-- | Make a \"context\" playlist where the playing track is in the 
+--   middle with tracks above and below, limted in total number.
+contextPlaylist :: YesodMPC m
+                => Int -- ^ Position of currently playing track
+                -> Int -- ^ Id of currently playing track
+                -> Int -- ^ Lines of context to show
+                -> GHandler s m [PlaylistItem MPCRoute]
+contextPlaylist pos cid lim = do
+    len    <- return . fromEither 0 length =<< withMPD (MPD.playlistInfo Nothing)
+    result <- withMPD  $ MPD.playlistInfo (Just $ fixBounds pos len lim)
+
+    return $ fromEither [] (map $ itemFromSong cid) result
+
+    where
         itemFromSong :: Int -> MPD.Song -> PlaylistItem MPCRoute
         itemFromSong cid song = let num = fromMaybe 0 . fmap snd $ MPD.sgIndex song
             in PlaylistItem
@@ -180,12 +190,9 @@ nowPlaying = do
                 , plAlbum   = shorten 20 $ getTag MPD.Album  song
                 , plTitle   = shorten 30 $ getTag MPD.Title  song
                 , plNo      = num
-                , plPlaying = cid == num
+                , plPlaying = num == cid
                 , plRoute   = PlayR num
                 }
-
-        shorten :: Int -> String -> String
-        shorten n s = if length s > n then take n s ++ "..." else s
 
 -- | Main page
 getStatusR :: YesodMPC m => GHandler MPC m RepHtmlJson
@@ -496,11 +503,9 @@ getStatusR = do
             ]
 
 -- Routes {{{
--- | Previous
 getPrevR :: YesodMPC m => GHandler MPC m RepHtmlJson
 getPrevR = authHelper >> actionRoute MPD.previous
 
--- | Smart play/pause button
 getPauseR :: YesodMPC m => GHandler MPC m RepHtmlJson
 getPauseR = authHelper >> getPlayPause >>= actionRoute
     where
@@ -514,18 +519,17 @@ getPauseR = authHelper >> getPlayPause >>= actionRoute
                     MPD.Stopped -> MPD.play Nothing
                     MPD.Paused  -> MPD.play Nothing
 
--- | Next
 getNextR :: YesodMPC m => GHandler MPC m RepHtmlJson
 getNextR = authHelper >> actionRoute MPD.next
 
--- | Play a specific song in playlist
 getPlayR :: YesodMPC m => Int -> GHandler MPC m RepHtmlJson
 getPlayR pid = authHelper >> actionRoute (MPD.playId pid)
 
 getDelR :: YesodMPC m => Int -> GHandler MPC m RepHtmlJson
 getDelR pid = authHelper >> actionRoute (MPD.deleteId pid)
 
--- | Execute any mpd action then redirect back to the main status page
+-- | Execute any mpd action then redirect back to the main status page, 
+--   can be called for Html or Json
 actionRoute :: YesodMPC m => MPD.MPD a -> GHandler MPC m RepHtmlJson
 actionRoute f = do
     toMaster <- getRouteToMaster
@@ -536,13 +540,15 @@ actionRoute f = do
 
 -- Helpers {{{
 
--- | Given the current song, length of current playlist, and how many 
---   lines of context to show, return the correct upper and lower bounds
---   to send to a MPD.playListInfo command to get the context playlist
+-- | Given the current song position, length of current playlist, and 
+--   how many lines of context to show, return the correct upper and 
+--   lower bounds to send to MPD.playlistInfo to get the correct 
+--   playlist items. Also prevents invalid bounds (negative lower or 
+--   upper beyond the end)
 fixBounds :: Int -- ^ pos of currently playing track
           -> Int -- ^ length of current playlist
           -> Int -- ^ how many lines of context to show
-          -> (Int, Int)
+          -> (Int, Int) -- ^ (lower, upper)
 fixBounds pos len limit = let
     lower = pos - limit `div` 2
     upper = pos + limit `div` 2
@@ -554,7 +560,18 @@ fixBounds pos len limit = let
             | u > len          = fixBounds (pos - (u - len)) len limit
             | otherwise        = (l,u)
 
+-- | Return the first requested metadata tag or \"N/A\"
 getTag :: MPD.Metadata -> MPD.Song -> String
 getTag tag = head . fromMaybe ["N/A"] . MPD.sgGet tag
+
+-- | Similar to fromMaybe, if value is Left, return the constant first 
+--   argument, otherwise apply the functional second argument to the 
+--   Right's unwrapped value (note: does not re-wrap)
+fromEither :: c -> (b -> c) -> Either a b -> c
+fromEither c f = either (const c) f
+
+-- | Truncate at desired length and add elipsis if truncated
+shorten :: Int -> String -> String
+shorten n s = if length s > n then take n s ++ "..." else s
 
 -- }}}
