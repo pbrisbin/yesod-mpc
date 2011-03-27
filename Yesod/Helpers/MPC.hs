@@ -118,9 +118,6 @@ data PlaylistItem = PlaylistItem
     , plRoute   :: MPCRoute -- ^ route to play this track
     }
 
--- | Some state that can be toggled
-data Toggle = PlayPause | Repeat | Random | Single | Consume
-
 -- | Wrap MPD.withMPD or MPD.withMPDEx depending on the users mpd 
 --   configuration
 withMPD :: YesodMPC m => MPD.MPD a -> GHandler s m (MPD.Response a)
