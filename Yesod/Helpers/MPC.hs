@@ -503,37 +503,31 @@ getStatusR = do
 
 -- Routes {{{
 getPrevR :: YesodMPC m => GHandler MPC m RepHtmlJson
-getPrevR = authHelper >> actionRoute MPD.previous
+getPrevR = actionRoute MPD.previous
 
 getPauseR :: YesodMPC m => GHandler MPC m RepHtmlJson
-getPauseR = authHelper >> getPlayPause >>= actionRoute
+getPauseR = actionRoute =<< go . fmap MPD.stState =<< withMPD MPD.status
     where
-        -- | return the correct function given the current state
-        getPlayPause :: YesodMPC m => GHandler MPC m (MPD.MPD ())
-        getPlayPause = withMPD MPD.status >>= either fromErr fromRes
-            where
-                fromErr _      = return $ MPD.play Nothing
-                fromRes status = return $ case MPD.stState status of
-                    MPD.Playing -> MPD.pause True
-                    MPD.Stopped -> MPD.play Nothing
-                    MPD.Paused  -> MPD.play Nothing
+        go (Right Playing) = return $ MPD.pause True
+        go _               = return $ MPD.play Nothing
 
 getNextR :: YesodMPC m => GHandler MPC m RepHtmlJson
-getNextR = authHelper >> actionRoute MPD.next
+getNextR = actionRoute MPD.next
 
 getPlayR :: YesodMPC m => Int -> GHandler MPC m RepHtmlJson
-getPlayR pid = authHelper >> actionRoute (MPD.playId pid)
+getPlayR = actionRoute . MPD.playId
 
 getDelR :: YesodMPC m => Int -> GHandler MPC m RepHtmlJson
-getDelR pid = authHelper >> actionRoute (MPD.deleteId pid)
+getDelR = actionRoute . MPD.deleteId
 
 -- | Execute any mpd action then redirect back to the main status page, 
 --   can be called for Html or Json
 actionRoute :: YesodMPC m => MPD.MPD a -> GHandler MPC m RepHtmlJson
 actionRoute f = do
-    toMaster <- getRouteToMaster
-    _        <- withMPD f
-    redirect RedirectTemporary $ toMaster StatusR
+    authHelper
+    _  <- withMPD f
+    tm <- getRouteToMaster
+    redirect RedirectTemporary $ tm StatusR
 
 -- }}}
 
