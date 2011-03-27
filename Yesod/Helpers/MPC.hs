@@ -80,12 +80,14 @@ class Yesod m => YesodMPC m where
 mkYesodSub "MPC" 
     [ ClassP ''YesodMPC [ VarT $ mkName "master" ] ] 
     [$parseRoutes|
-        /            StatusR GET
-        /prev        PrevR   GET
-        /pause       PauseR  GET
-        /next        NextR   GET
-        /play/#Int   PlayR   GET
-        /delete/#Int DelR    GET
+        /            StatusR  GET
+        /prev        PrevR    GET
+        /next        NextR    GET
+        /play/#Int   PlayR    GET
+        /delete/#Int DelR     GET
+        /pause       PauseR   GET
+        /repeat      RepeatR  GET
+        /random      RandomR  GET
         |]
 
 -- | Represents now playing state, see 'nowPlaying' for how this is 
@@ -115,6 +117,9 @@ data PlaylistItem = PlaylistItem
     , plPlaying :: Bool     -- ^ item is currently playing
     , plRoute   :: MPCRoute -- ^ route to play this track
     }
+
+-- | Some state that can be toggled
+data Toggle = PlayPause | Repeat | Random | Single | Consume
 
 -- | Wrap MPD.withMPD or MPD.withMPDEx depending on the users mpd 
 --   configuration
@@ -169,7 +174,7 @@ nowPlaying = do
         progress (d,i) = (*100) (d / realToFrac i)
 
 -- | Make a \"context\" playlist where the playing track is in the 
---   middle with tracks above and below, limted in total number.
+--   middle with tracks above and below, limited in total number
 contextPlaylist :: YesodMPC m
                 => Int -- ^ Position of currently playing track
                 -> Int -- ^ Id of currently playing track
@@ -193,7 +198,7 @@ contextPlaylist pos cid lim = do
                 , plRoute   = PlayR num
                 }
 
--- | Main page
+-- | Main page {{{
 getStatusR :: YesodMPC m => GHandler MPC m RepHtmlJson
 getStatusR = do
     authHelper
@@ -501,15 +506,10 @@ getStatusR = do
             , ( "route"  , jsonScalar . r . tm . PlayR $ plNo item                )
             ]
 
--- Routes {{{
+-- }}}
+
 getPrevR :: YesodMPC m => GHandler MPC m RepHtmlJson
 getPrevR = actionRoute MPD.previous
-
-getPauseR :: YesodMPC m => GHandler MPC m RepHtmlJson
-getPauseR = actionRoute =<< go . fmap MPD.stState =<< withMPD MPD.status
-    where
-        go (Right Playing) = return $ MPD.pause True
-        go _               = return $ MPD.play Nothing
 
 getNextR :: YesodMPC m => GHandler MPC m RepHtmlJson
 getNextR = actionRoute MPD.next
@@ -520,18 +520,35 @@ getPlayR = actionRoute . MPD.playId
 getDelR :: YesodMPC m => Int -> GHandler MPC m RepHtmlJson
 getDelR = actionRoute . MPD.deleteId
 
--- | Execute any mpd action then redirect back to the main status page, 
---   can be called for Html or Json
-actionRoute :: YesodMPC m => MPD.MPD a -> GHandler MPC m RepHtmlJson
+getPauseR :: YesodMPC m => GHandler MPC m RepHtmlJson
+getPauseR = toggleRoute MPD.stState flipPP
+    where
+        flipPP Playing = MPD.pause True
+        flipPP _       = MPD.play  Nothing
+
+getRepeatR :: YesodMPC m => GHandler MPC m RepHtmlJson
+getRepeatR = toggleRoute MPD.stRepeat (MPD.repeat . not)
+
+getRandomR :: YesodMPC m => GHandler MPC m RepHtmlJson
+getRandomR = toggleRoute MPD.stRandom (MPD.random . not)
+
+-- | Execute any mpd action then redirect back to status page
+actionRoute :: YesodMPC m => MPD.MPD () -> GHandler MPC m RepHtmlJson
 actionRoute f = do
     authHelper
     _  <- withMPD f
     tm <- getRouteToMaster
     redirect RedirectTemporary $ tm StatusR
 
--- }}}
-
--- Helpers {{{
+-- | Toggle any mpd setting then redirect back to status page
+toggleRoute :: YesodMPC m
+            => (MPD.Status -> a)  -- ^ how to get from state to current setting
+            -> (a -> MPD.MPD ())  -- ^ how to set new setting based on current state
+            -> GHandler MPC m RepHtmlJson
+toggleRoute get set = go . fmap get =<< withMPD MPD.status
+    where
+        go (Right v) = actionRoute $ set v
+        go _         = actionRoute $ return ()
 
 -- | Given the current song position, length of current playlist, and 
 --   how many lines of context to show, return the correct upper and 
@@ -566,5 +583,3 @@ fromEither c f = either (const c) f
 -- | Truncate at desired length and add elipsis if truncated
 shorten :: Int -> String -> String
 shorten n s = if length s > n then take n s ++ "..." else s
-
--- }}}
