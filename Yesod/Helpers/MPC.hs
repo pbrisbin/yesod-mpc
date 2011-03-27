@@ -24,7 +24,6 @@ module Yesod.Helpers.MPC
     , MpdConfig(..)
     -- * Subsite
     , MPC
-    , MPCRoute(..)
     , getMPC
     -- * MPD interface
     , withMPD
@@ -40,47 +39,22 @@ import Text.Blaze (toHtml)
 import Data.Maybe (fromMaybe)
 import Language.Haskell.TH.Syntax hiding (lift)
 
+import Network.MPD (Host, Port, Password, 
+                    State(..), Title, Artist, Album)
+
 import qualified Network.MPD as MPD
-
--- | Represents now playing state, see 'nowPlaying' for how this is 
---   constructed when needed.
-data NowPlaying url = NowPlaying
-    { npState    :: String
-    , npTitle    :: String
-    , npArtist   :: String
-    , npAlbum    :: String
-    , npYear     :: String
-    , npPos      :: Int          -- ^ position in playlist
-    , npId       :: Int          -- ^ playlist id
-    , npCur      :: String       -- ^ time elapsed, MM:SS
-    , npTot      :: String       -- ^ song length, MM:SS
-    , npProg     :: Double       -- ^ percentage elapsed for convenience
-    , npCover    :: Maybe String -- ^ url to cover image if setup
-    , npPlaylist :: [PlaylistItem url]
-    }
-
--- | An item in the playlist, a few extra values from NowPlaying for 
---   convenience
-data PlaylistItem url = PlaylistItem
-    { plNo      :: Int
-    , plArtist  :: String
-    , plAlbum   :: String
-    , plTitle   :: String
-    , plPlaying :: Bool -- ^ item is currently playing
-    , plRoute   :: url  -- ^ route to play this track
-    }
-
--- | Customize your connection to MPD
-data MpdConfig = MpdConfig
-    { mpdHost     :: MPD.Host -- ^ String
-    , mpdPort     :: MPD.Port -- ^ Int
-    , mpdPassword :: String
-    }
 
 data MPC = MPC
 
 getMPC :: a -> MPC
 getMPC = const MPC
+
+-- | Customize your connection to MPD
+data MpdConfig = MpdConfig
+    { mpdHost     :: Host
+    , mpdPort     :: Port
+    , mpdPassword :: Password
+    }
 
 class Yesod m => YesodMPC m where
     -- | seconds, default is 1, return 0 to disable
@@ -95,8 +69,8 @@ class Yesod m => YesodMPC m where
     authHelper :: GHandler s m ()
     authHelper = return ()
 
-    -- | (Artist,Album) -> Maybe Cover url: default is Nothing
-    albumArtHelper :: (String,String) -> GHandler s m (Maybe String)
+    -- | default is Nothing
+    albumArtHelper :: (Artist, Album) -> GHandler s m (Maybe String)
     albumArtHelper = return . const Nothing
 
     -- | In case you serve your own jQuery, default is hosted by google
@@ -114,6 +88,34 @@ mkYesodSub "MPC"
         /delete/#Int DelR    GET
         |]
 
+-- | Represents now playing state, see 'nowPlaying' for how this is 
+--   constructed when needed.
+data NowPlaying = NowPlaying
+    { npState    :: State
+    , npTitle    :: Title
+    , npArtist   :: Artist
+    , npAlbum    :: Album
+    , npYear     :: String
+    , npPos      :: Int            -- ^ position in playlist
+    , npId       :: Int            -- ^ id in playlist
+    , npCur      :: String         -- ^ time elapsed, MM:SS
+    , npTot      :: String         -- ^ song length, MM:SS
+    , npProg     :: Double         -- ^ percentage elapsed (for convenience)
+    , npCover    :: Maybe String   -- ^ url to cover image if setup
+    , npPlaylist :: [PlaylistItem] -- ^ playlist context
+    }
+
+-- | An item in the playlist, a few extra values from NowPlaying for 
+--   convenience
+data PlaylistItem = PlaylistItem
+    { plNo      :: Int
+    , plArtist  :: Artist
+    , plAlbum   :: Album
+    , plTitle   :: Title
+    , plPlaying :: Bool     -- ^ item is currently playing
+    , plRoute   :: MPCRoute -- ^ route to play this track
+    }
+
 -- | Wrap MPD.withMPD or MPD.withMPDEx depending on the users mpd 
 --   configuration
 withMPD :: YesodMPC m => MPD.MPD a -> GHandler s m (MPD.Response a)
@@ -124,7 +126,7 @@ withMPD f = do
         Just c  -> MPD.withMPDEx (mpdHost c) (mpdPort c) (mpdPassword c) f
 
 -- | Return now playing info or nothing
-nowPlaying :: YesodMPC m => GHandler s m (Maybe (NowPlaying MPCRoute))
+nowPlaying :: YesodMPC m => GHandler s m (Maybe NowPlaying)
 nowPlaying = do
     songResp  <- withMPD MPD.currentSong
     stateResp <- withMPD MPD.status
@@ -137,17 +139,14 @@ nowPlaying = do
             let sId    = fromMaybe (-1) . fmap snd $ MPD.sgIndex song
 
             playlist <- contextPlaylist sPos sId 10 -- limit
-            coverurl <- albumArtHelper (artist,album)
+            coverurl <- albumArtHelper (artist, album)
 
             return $ Just NowPlaying
                 { npTitle    = getTag MPD.Title song
                 , npArtist   = artist
                 , npAlbum    = album
                 , npYear     = getTag MPD.Date song
-                , npState    = case MPD.stState state of
-                    MPD.Playing -> "playing"
-                    MPD.Paused  -> "paused"
-                    MPD.Stopped -> "stopped"
+                , npState    = MPD.stState state
                 , npPos      = sPos
                 , npId       = sId
                 , npCur      = format . round . fst $ MPD.stTime state
@@ -175,7 +174,7 @@ contextPlaylist :: YesodMPC m
                 => Int -- ^ Position of currently playing track
                 -> Int -- ^ Id of currently playing track
                 -> Int -- ^ Lines of context to show
-                -> GHandler s m [PlaylistItem MPCRoute]
+                -> GHandler s m [PlaylistItem]
 contextPlaylist pos cid lim = do
     len    <- return . fromEither 0 length =<< withMPD (MPD.playlistInfo Nothing)
     result <- withMPD  $ MPD.playlistInfo (Just $ fixBounds pos len lim)
@@ -183,7 +182,7 @@ contextPlaylist pos cid lim = do
     return $ fromEither [] (map $ itemFromSong cid) result
 
     where
-        itemFromSong :: Int -> MPD.Song -> PlaylistItem MPCRoute
+        itemFromSong :: Int -> MPD.Song -> PlaylistItem
         itemFromSong cid song = let num = fromMaybe 0 . fmap snd $ MPD.sgIndex song
             in PlaylistItem
                 { plArtist  = shorten 20 $ getTag MPD.Artist song
@@ -212,7 +211,7 @@ getStatusR = do
            
             setTitle $ toHtml ("MPD - " ++ npTitle np)
 
-            let playing = npState np == "playing"
+            let playing = npState np == Playing
             
             -- javascript {{{
             addJulius [$julius|
@@ -320,7 +319,7 @@ getStatusR = do
 
                         // update play/pause button
                         switch (o.state) {
-                            case "playing":
+                            case "Playing":
                                 $("#mpc_play").css(  { display: "none"         });
                                 $("#mpc_pause").css( { display: "inline-block" });
                                 break;
@@ -397,7 +396,7 @@ getStatusR = do
                         <span #mpc_pos style="display: none;">#{show $ npPos np}
                         <span #mpc_id style="display: none;">#{show $ npId np}
 
-                        <span #mpc_state>#{npState np}
+                        <span #mpc_state>#{show $ npState np}
                         <span #mpc_sep> / 
                         <span #mpc_artist>#{npArtist np}
                         <span #mpc_sep> - 
@@ -474,15 +473,15 @@ getStatusR = do
 
         jsonRep tm r (Just np) = jsonMap
             [ ("status"  , jsonScalar $ "OK"                             )
-            , ("state"   , jsonScalar $ npState np                       )
             , ("title"   , jsonScalar $ npTitle np                       )
             , ("artist"  , jsonScalar $ npArtist np                      )
             , ("album"   , jsonScalar $ npAlbum np                       )
             , ("year"    , jsonScalar $ npYear np                        )
-            , ("pos"     , jsonScalar . show $ npPos np                  )
-            , ("id"      , jsonScalar . show $ npId np                   )
             , ("cur"     , jsonScalar $ npCur np                         )
             , ("tot"     , jsonScalar $ npTot np                         )
+            , ("state"   , jsonScalar . show $ npState np                )
+            , ("pos"     , jsonScalar . show $ npPos np                  )
+            , ("id"      , jsonScalar . show $ npId np                   )
             , ("progress", jsonScalar . show $ npProg np                 )
             , ("coverurl", jsonScalar . fromMaybe "" $ npCover np        )
             , ("playlist", jsonList $ map (jsonItem tm r) (npPlaylist np))
