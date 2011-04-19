@@ -25,6 +25,7 @@ module Yesod.Helpers.MPC
     -- * Subsite
     , MPC
     , getMPC
+    , MPCRoute(..)
     -- * MPD interface
     , withMPD
     , NowPlaying(..)
@@ -79,7 +80,7 @@ class Yesod m => YesodMPC m where
 
 mkYesodSub "MPC" 
     [ ClassP ''YesodMPC [ VarT $ mkName "master" ] ] 
-    [$parseRoutes|
+    [parseRoutes|
         /            StatusR  GET
         /prev        PrevR    GET
         /next        NextR    GET
@@ -216,7 +217,7 @@ getStatusR = do
             let playing = npState np == Playing
             
             -- javascript {{{
-            addJulius [$julius|
+            addJulius [julius|
                 /* click events */
                 function buttonEvent(e) {
                     var prevR  = "@{toMaster PrevR}";
@@ -347,7 +348,7 @@ getStatusR = do
             -- }}}
             
             -- css {{{
-            addCassius [$cassius|
+            addCassius [cassius|
                 #mpc_cover
                     float:        left
                     height:       72px
@@ -385,7 +386,7 @@ getStatusR = do
             -- }}}
 
             -- html {{{
-            [$hamlet|
+            [hamlet|
                 <h1>MPD
 
                 <div .mpc_nowplaying>
@@ -466,7 +467,7 @@ getStatusR = do
 
         htmlRep _ _  = do
             setTitle $ toHtml "MPD"
-            [$hamlet|
+            [hamlet|
                 <h1>MPD
                 <div .mpc_error>
                     <p>
