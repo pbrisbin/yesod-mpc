@@ -138,8 +138,8 @@ nowPlaying = do
         (Right (Just song), Right state) -> do
             let artist = shorten 20 $ getTag MPD.Artist song
             let album  = shorten 20 $ getTag MPD.Album  song
-            let sPos   = fromMaybe (-1) . fmap fst $ MPD.sgIndex song
-            let sId    = fromMaybe (-1) . fmap snd $ MPD.sgIndex song
+            let sPos   = fromMaybe (-1) $ MPD.stSongPos state
+            let sId    = fromMaybe (-1) $ MPD.stSongID  state
 
             playlist <- contextPlaylist sPos sId 10 -- limit
             coverurl <- albumArtHelper (artist, album)
@@ -186,7 +186,7 @@ contextPlaylist pos cid lim = do
 
     where
         itemFromSong :: Int -> MPD.Song -> PlaylistItem
-        itemFromSong cid song = let num = fromMaybe 0 . fmap snd $ MPD.sgIndex song
+        itemFromSong cid song = let num = fromMaybe 0 $ MPD.sgIndex song
             in PlaylistItem
                 { plArtist  = shorten 20 $ getTag MPD.Artist song
                 , plAlbum   = shorten 20 $ getTag MPD.Album  song
@@ -570,7 +570,7 @@ fixBounds pos len limit = let
 
 -- | Return the first requested metadata tag or \"N/A\"
 getTag :: MPD.Metadata -> MPD.Song -> String
-getTag tag = head . fromMaybe ["N/A"] . MPD.sgGet tag
+getTag tag = head . fromMaybe ["N/A"] . MPD.sgGetTag tag
 
 -- | Similar to fromMaybe, if value is Left, return the constant first 
 --   argument, otherwise apply the functional second argument to the 
