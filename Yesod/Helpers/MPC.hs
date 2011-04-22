@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE TypeFamilies          #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings     #-}
 -------------------------------------------------------------------------------
 -- |
 -- Module        : Yesod.Helpers.MPC
@@ -35,8 +36,6 @@ module Yesod.Helpers.MPC
     ) where
 
 import Yesod
-import Text.Blaze (toHtml)
-
 import Data.Maybe (fromMaybe)
 import Language.Haskell.TH.Syntax hiding (lift)
 
@@ -44,6 +43,7 @@ import Network.MPD (Host, Port, Password,
                     State(..), Title, Artist, Album)
 
 import qualified Network.MPD as MPD
+import qualified Data.Text   as T
 
 data MPC = MPC
 
@@ -186,13 +186,13 @@ contextPlaylist pos cid lim = do
 
     where
         itemFromSong :: Int -> MPD.Song -> PlaylistItem
-        itemFromSong cid song = let num = fromMaybe 0 $ MPD.sgIndex song
+        itemFromSong cId song = let num = fromMaybe 0 $ MPD.sgIndex song
             in PlaylistItem
                 { plArtist  = shorten 20 $ getTag MPD.Artist song
                 , plAlbum   = shorten 20 $ getTag MPD.Album  song
                 , plTitle   = shorten 30 $ getTag MPD.Title  song
                 , plNo      = num
-                , plPlaying = num == cid
+                , plPlaying = num == cId
                 , plRoute   = PlayR num
                 }
 
@@ -466,7 +466,7 @@ getStatusR = do
                 -- }}}
 
         htmlRep _ _  = do
-            setTitle $ toHtml "MPD"
+            setTitle "MPD"
             [hamlet|
                 <h1>MPD
                 <div .mpc_error>
@@ -501,7 +501,7 @@ getStatusR = do
             , ( "album"  , jsonScalar $ plAlbum item                              )
             , ( "title"  , jsonScalar $ plTitle item                              )
             , ( "playing", jsonScalar $ if plPlaying item then "true" else "false")
-            , ( "route"  , jsonScalar . r . tm . PlayR $ plNo item                )
+            , ( "route"  , jsonScalar . T.unpack . r . tm . PlayR $ plNo item     )
             ]
 
 -- }}}
@@ -543,9 +543,9 @@ toggleRoute :: YesodMPC m
             => (MPD.Status -> a)  -- ^ how to get from state to current setting
             -> (a -> MPD.MPD ())  -- ^ how to set new setting based on current state
             -> GHandler MPC m RepHtmlJson
-toggleRoute get set = go . fmap get =<< withMPD MPD.status
+toggleRoute from to = go . fmap from =<< withMPD MPD.status
     where
-        go (Right v) = actionRoute $ set v
+        go (Right v) = actionRoute $ to v
         go _         = actionRoute $ return ()
 
 -- | Given the current song position, length of current playlist, and 
