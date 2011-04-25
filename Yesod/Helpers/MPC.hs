@@ -178,13 +178,24 @@ contextPlaylist :: YesodMPC m
                 -> Int -- ^ Id of currently playing track
                 -> Int -- ^ Lines of context to show
                 -> GHandler s m [PlaylistItem]
-contextPlaylist pos cid lim = do
-    len    <- return . fromEither 0 length =<< withMPD (MPD.playlistInfo Nothing)
-    result <- withMPD  $ MPD.playlistInfo (Just $ fixBounds pos len lim)
-
-    return $ fromEither [] (map $ itemFromSong cid) result
+contextPlaylist pos cid lim = return . helper =<< withMPD (MPD.playlistInfo Nothing)
 
     where
+        helper (Left  _  ) = []
+        helper (Right res) = map (itemFromSong cid) . take lim $ drop (getDrop pos (length res) lim) res
+
+        getDrop 0   _   _     = 0
+        getDrop _   0   _     = 0
+        getDrop _   _   0     = 0
+        getDrop pos len limit = let 
+            half = limit `div` 2 
+            bot  = pos - (half - 1) in go bot (bot + limit)
+            where
+                go b t
+                    | b <= 0    = 0
+                    | t > len   = getDrop (pos - 1) len limit
+                    | otherwise = b - 1
+
         itemFromSong :: Int -> MPD.Song -> PlaylistItem
         itemFromSong cId song = let num = fromMaybe 0 $ MPD.sgIndex song
             in PlaylistItem
@@ -547,26 +558,6 @@ toggleRoute from to = go . fmap from =<< withMPD MPD.status
     where
         go (Right v) = actionRoute $ to v
         go _         = actionRoute $ return ()
-
--- | Given the current song position, length of current playlist, and 
---   how many lines of context to show, return the correct upper and 
---   lower bounds to send to MPD.playlistInfo to get the correct 
---   playlist items. Also prevents invalid bounds (negative lower or 
---   upper beyond the end)
-fixBounds :: Int -- ^ pos of currently playing track
-          -> Int -- ^ length of current playlist
-          -> Int -- ^ how many lines of context to show
-          -> (Int, Int) -- ^ (lower, upper)
-fixBounds pos len limit = let
-    lower = pos - limit `div` 2
-    upper = pos + limit `div` 2
-    in go lower upper
-    where
-        go l u
-            | l < 0 && u > len = (0,len)
-            | l < 0            = fixBounds (limit `div` 2)   len limit
-            | u > len          = fixBounds (pos - (u - len)) len limit
-            | otherwise        = (l,u)
 
 -- | Return the first requested metadata tag or \"N/A\"
 getTag :: MPD.Metadata -> MPD.Song -> String

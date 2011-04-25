@@ -1,5 +1,7 @@
 {-# LANGUAGE QuasiQuotes           #-}
 {-# LANGUAGE TypeFamilies          #-}
+{-# LANGUAGE TemplateHaskell       #-}
+{-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 --
 -- pbrisbin 2010
@@ -15,7 +17,7 @@ import Network.Wai.Handler.Warp (run)
 data MpcTest = MpcTest
 
 -- | Have an mpc route
-mkYesod "MpcTest" [$parseRoutes| / MpcR MPC getMPC |]
+mkYesod "MpcTest" [parseRoutes| / MpcR MPC getMPC |]
 
 instance Yesod MpcTest where approot _ = ""
 
