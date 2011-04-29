@@ -1,5 +1,5 @@
 name:                yesod-mpc
-version:             0.1
+version:             0.2
 synopsis:            Controlling a running mpd through a yesod subsite
 homepage:            http://github.com/pbrisbin/yesod-mpc
 license:             BSD3
