@@ -13,15 +13,14 @@ module Test where
 import Yesod
 import Yesod.Helpers.MPC
 import Network.Wai.Handler.Warp (run)
+import qualified Network.MPD as MPD
 
 data MpcTest = MpcTest
 
--- | Have an mpc route
 mkYesod "MpcTest" [parseRoutes| / MpcR MPC getMPC |]
 
 instance Yesod MpcTest where approot _ = ""
 
--- | Make your site an instance of YesodMPC using all default values
 instance YesodMPC MpcTest
 
 main :: IO ()

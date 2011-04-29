@@ -22,13 +22,11 @@ module Yesod.Helpers.MPC
     ( 
     -- * Usage
       YesodMPC(..)
-    , MpdConfig(..)
     -- * Subsite
     , MPC
     , getMPC
     , MPCRoute(..)
     -- * MPD interface
-    , withMPD
     , NowPlaying(..)
     , nowPlaying
     , PlaylistItem(..)
@@ -50,21 +48,11 @@ data MPC = MPC
 getMPC :: a -> MPC
 getMPC = const MPC
 
--- | Customize your connection to MPD
-data MpdConfig = MpdConfig
-    { mpdHost     :: Host
-    , mpdPort     :: Port
-    , mpdPassword :: Password
-    }
-
 class Yesod m => YesodMPC m where
-    -- | seconds, default is 1, return 0 to disable
-    refreshSpeed :: GHandler s m Int
-    refreshSpeed = return 1
-
-    -- | default is Nothing, standard connection
-    mpdConfig :: GHandler s m (Maybe MpdConfig)
-    mpdConfig = return Nothing
+    -- | Supply the @withMPD@ function for connecting to your MPD 
+    --   server.
+    withMPD :: Yesod m => MPD.MPD a -> GHandler s m (MPD.Response a)
+    withMPD = liftIO . MPD.withMPD
 
     -- | default is return (), don't authenticate
     authHelper :: GHandler s m ()
@@ -73,6 +61,10 @@ class Yesod m => YesodMPC m where
     -- | default is Nothing
     albumArtHelper :: (Artist, Album) -> GHandler s m (Maybe String)
     albumArtHelper = return . const Nothing
+
+    -- | seconds, default is 1, return 0 to disable
+    refreshSpeed :: GHandler s m Int
+    refreshSpeed = return 1
 
     -- | In case you serve your own jQuery, default is hosted by google
     jQueryUrl :: GHandler s m String
@@ -118,15 +110,6 @@ data PlaylistItem = PlaylistItem
     , plPlaying :: Bool     -- ^ item is currently playing
     , plRoute   :: MPCRoute -- ^ route to play this track
     }
-
--- | Wrap MPD.withMPD or MPD.withMPDEx depending on the users mpd 
---   configuration
-withMPD :: YesodMPC m => MPD.MPD a -> GHandler s m (MPD.Response a)
-withMPD f = do
-    config <- mpdConfig
-    liftIO $ case config of
-        Nothing -> MPD.withMPD f
-        Just c  -> MPD.withMPDEx (mpdHost c) (mpdPort c) (mpdPassword c) f
 
 -- | Return now playing info or nothing
 nowPlaying :: YesodMPC m => GHandler s m (Maybe NowPlaying)
@@ -229,6 +212,9 @@ getStatusR = do
             
             -- javascript {{{
             addJulius [julius|
+                // top-level, server-set variable
+                var delay = #{show delay};
+
                 /* click events */
                 function buttonEvent(e) {
                     var prevR  = "@{toMaster PrevR}";
@@ -344,15 +330,14 @@ getStatusR = do
                                 break;
                         }
                     }
+
+                    setTimeout("getNowPlaying();", delay);
                 }
 
                 /* called on document to kick it off */
                 function getNowPlaying() {
-                    var delay = #{show delay}; // server-set
-
                     if (delay != 0) {
                         $.getJSON(window.location.href, {}, ajaxUpdate);
-                        setTimeout("getNowPlaying();", delay);
                     }
                 }
             |]
