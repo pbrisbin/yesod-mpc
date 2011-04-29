@@ -547,12 +547,6 @@ toggleRoute from to = go . fmap from =<< withMPD MPD.status
 getTag :: MPD.Metadata -> MPD.Song -> String
 getTag tag = head . fromMaybe ["N/A"] . MPD.sgGetTag tag
 
--- | Similar to fromMaybe, if value is Left, return the constant first 
---   argument, otherwise apply the functional second argument to the 
---   Right's unwrapped value (note: does not re-wrap)
-fromEither :: c -> (b -> c) -> Either a b -> c
-fromEither c f = either (const c) f
-
 -- | Truncate at desired length and add elipsis if truncated
 shorten :: Int -> String -> String
 shorten n s = if length s > n then take n s ++ "..." else s
