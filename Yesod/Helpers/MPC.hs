@@ -37,8 +37,7 @@ import Yesod
 import Data.Maybe (fromMaybe)
 import Language.Haskell.TH.Syntax hiding (lift)
 
-import Network.MPD (Host, Port, Password, 
-                    State(..), Title, Artist, Album)
+import Network.MPD (State(..), Title, Artist, Album)
 
 import qualified Network.MPD as MPD
 import qualified Data.Text   as T
